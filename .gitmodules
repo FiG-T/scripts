@@ -1,0 +1,3 @@
+[submodule "R/lhf_r"]
+	path = R/lhf_r
+	url = https://github.com/FiG-T/scripts.git
