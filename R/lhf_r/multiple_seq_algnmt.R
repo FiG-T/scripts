@@ -5,6 +5,8 @@ library(dplyr)
 library(phylotools)
 library(msa)
 library(ape)
+library(seqinr)
+library(DECIPHER)
 
 ## Creating temporary practice file 
 
@@ -29,12 +31,26 @@ dat2fasta(mito_seq, "../../../data/lhf_d/output.fasta")
 seq_mt <- readDNAStringSet("output.fasta")
 seq_mt
 
-
 algn_muscle <- msaMuscle(seq_mt)
 
 algn_ape <- msaConvert(algn_muscle, "ape::DNAbin")
 
-write.FASTA(algn_ape, "aln_muscle.fasta")
+write.FASTA(algn_ape, "../../../data/lhf_d/aln_10_muscle.fasta")
   #. this file can be read in AliView
 
+algn_muscle2 <- msaConvert(algn_muscle, type="seqinr::alignment")
+d <- dist.alignment(algn_muscle2, "identity")
+
+mt_tree <- ape::nj(d)
+plot(mt_tree)
+
+##. ----- Aligning using the DECIPHER package --- 
+
+seq_mt <- readDNAStringSet("output.fasta")   # as above
+
+decipher_algn <- DECIPHER::AlignSeqs(seq_mt)
+Biostrings::writeXStringSet(decipher_algn, "../../../data/lhf_d/aln_10_decipher.fasta")
+
+decipher_algn2 <- as.alignment(decipher_algn, mode = "any")
+d <- dist.alignment(decipher_algn, "identity")
 
