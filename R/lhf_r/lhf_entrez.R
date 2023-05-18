@@ -78,3 +78,34 @@ for( seq_start in seq(1,63500,50)){
 #. This output file can be processed using the python script to extract the 
 #. country information etc.
   
+
+## ---------------------------------------------------------------------------
+##.  Formatting the extracted information
+
+mito_extracted <- read.delim("../../../data/lhf_d/genbank_output_D.tsv")
+
+
+
+## ---------------------------------------------------------------------------
+#. Extracting the information directly from NCBI
+
+mtDNA_summary <- entrez_summary(
+  db = "nucleotide", 
+  id = mtDNA_search$ids    # list of ids 
+)
+mtDNA_summary
+
+subnames<- extract_from_esummary(mtDNA_summary, "subname") # retrieve values from the above summary
+# taxid :  number associated with taxa (9606 = sapiens) --- no longer the case
+# subname: notes, inc. location data
+
+mitotable<- data.frame(notes = subnames)
+head(mitotable)
+
+library(stringr)
+library(tidyr)
+mitotable_temp <- separate(
+  mitotable, notes, 
+  sep = "\\|",
+  into = c("sub_a", "sub_b", "sub_c", "sub_d")
+)
