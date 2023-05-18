@@ -27,7 +27,6 @@ entrez_db_searchable("nucleotide")
 # ---------------------------------------------------------------------------------------
 
 mtDNA_search <- entrez_search(  # custom search 
-  <<<<<<< HEAD
   db = "nucleotide",   
   term = "(mitochondrion[ALL Fields])
   AND Homo sapiens[ORGN] AND (15400[SLEN] : 16600[SLEN])" 
@@ -84,7 +83,11 @@ for( seq_start in seq(1,63500,50)){
 
 mito_extracted <- read.delim("../../../data/lhf_d/genbank_output_D.tsv")
 
-
+#. Getting country list: 
+library(dplyr)
+world_countries <- ggplot2::map_data("world")
+world_countries <- distinct(select(world_countries, region))
+world_countries <- 
 
 ## ---------------------------------------------------------------------------
 #. Extracting the information directly from NCBI
