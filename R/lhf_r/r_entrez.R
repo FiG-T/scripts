@@ -60,22 +60,57 @@ mitomap_search$web_history
 #   Each summary search must have EITHER a list of ids OR a web_history link from a search. 
 
 
+mitomap_search
+
+#  attempting to write a loop... 
+#    using web history: 
+for( seq_start in seq(1,500,50)){     # up to file 500
+  recs <- entrez_fetch(
+    db ="nucleotide", 
+    web_history = mitomap_search$web_history,
+    rettype ="gb", 
+    retmax = 50, 
+    retstart=seq_start)
+  Sys.sleep(0.1)          # to ensure NCBI is not overloaded.
+  cat(recs, file="mitomap_gb_full.txt", append=TRUE)
+  cat(seq_start + 49, "GenBank files downloaded\r")
+}
+
+   #. This output file can be processed using the python script to extract the 
+   #. country information etc. 
+
+
+
+
 mitomap_acc <- entrez_fetch(    # to retrive the accession numbers: 
   db = "nucleotide",
   web_history = mitomap_search$web_history,  
-  rettype = "gb"
-)
-class(mitomap_acc)
-write(mitomap_acc, file= "mitomap_acc_full.txt") 
+  rettype = "acc"
+)    #. This only returns 10000 numbers --- not sure why...
+
+stringr::str_length(mitomap_acc[[1]])/12
+mitomap_acc_list <- stringr::str_split(mitomap_acc, "\n")
+length(mitomap_acc_list[[1]])
+mitomap_acc_list <- c(mitomap_acc_list[[1]])
+length(mitomap_acc_list)
 
 
+mitomap_acc_list <- read.delim("mitomap_acc_full.txt") 
+mitomap_acc_list_ <-mitomap_acc_list[,1]
+head(mitomap_acc_list_)
+length(mitomap_acc_list_)   # list of 9998 ACC numbers
+
+
+
+#.  To get a shorter list of ids/acc no. ... 
 mtDNA_summary <- entrez_summary(
   db = "nucleotide", 
-  id = mitomap_acc_list_v[1:20]    # list of ids -- se
+  id = mitomap_acc_list_v[1:20]    # list of ids -- this does not work
 )
 mtDNA_summary
 
-subnames<- extract_from_esummary(mtDNA_summary, "subname") # retrieve values from the above summary
+subnames<- extract_from_esummary(mtDNA_summary, "subname") 
+# retrieve values from the above summary
 # taxid :  number associated with taxa (9606 = sapiens)
 # subname: notes, inc. location data
 
@@ -92,63 +127,26 @@ mitotable_temp <- separate(
 )
 
 
+#. 
 mitomap_summary <- entrez_summary(   
   db = "nucleotide",
-  web_history = mitomap_search$web_history   # using the web_history
+  web_history = mitomap_search$web_history   # using the web_history 
+  #. This will not work if there are more than 500 objects in the web summary. 
 )
 extract_from_esummary(mitomap_summary, "uid") 
 # the number of results returned is limited to the rettmax from the search above. 
 
 
-##  Fetch 
-
-mitomap_acc <- entrez_fetch(    # to retrive the accession numbers: 
-  db = "nucleotide",
-  web_history = mitomap_search$web_history,  
-  rettype = "gb"
-)
-class(mitomap_acc)
-write(mitomap_acc, file= "mitomap_acc_full.txt")  # stores 9998 accession numbers
-
-mitomap_acc_full <- read.delim("mitomap_acc_test.txt")
-nrow(mitomap_acc_full)
-str(mitomap_acc_full)
-
-mitomap_acc_list <- read.delim("mitomap_acc_full.txt") 
-mitomap_acc_list_v <-mitomap_acc_full[,1]
-head(mitomap_acc_list_v)
-length(mitomap_acc_list_v)   # list of 71449 ACC numbers
-
-
-mitomap_gb <- entrez_fetch(
-  db = "nucleotide", 
-  id = mitomap_acc_list_v[1:5], 
-  rettype = "gb"
-)
-write(mitomap_gb, "mitomap_gb_test.txt", append = TRUE)
-
-#  attempting to write a loop... 
-#    using web history: 
+#.   ------------------------------------------------------------------
+#.   Loop experiments
+# 
 for( seq_start in seq(1,63500,50)){
   recs <- entrez_fetch(
     db ="nucleotide", 
     web_history = mitomap_search$web_history,
-    rettype ="gb", 
+    rettype ="acc", 
     retmax = 50, 
     retstart=seq_start)
-  Sys.sleep(0.1)          # to ensure NCBI is not overloaded.
-  cat(recs, file="mitomap_gb_full.txt", append=TRUE)
-  cat(seq_start + 49, "GenBank files downloaded\r")
-}
-
-# using stored ids 
-for( seq_start in seq(1,63500,2)){
-  recs <- entrez_fetch(
-    db ="nucleotide", 
-    id = mitomap_acc_list_v,
-    rettype ="gb", 
-    retmax = 500, 
-    retstart=seq_start)
-  cat(recs, file="mitomap_gb_full.txt", append=TRUE)
-  cat(seq_start + 4, "GenBank files downloaded\r")
+  cat(recs, file="mitomap_acc_full.txt", append=TRUE)
+  cat(seq_start + 49, "Acc files downloaded\r")
 }
