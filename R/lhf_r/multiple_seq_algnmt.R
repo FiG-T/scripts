@@ -1,4 +1,12 @@
-##. Performing multiple sequence alignments
+
+##   ----- Performing multiple sequence alignments -----
+#          ---------------------------------------
+
+#.   This scripts contains the test code to align sequences using MUSCLE, 
+#.   DECIPHER, and MAFFT packages (see sections below).  Data used herein are 
+#.   mitochondrial genomes obtained from entrez (see lhf_entrez.R). 
+
+## Libraries required:    -----
 
 library(stringr)
 library(dplyr)
@@ -8,7 +16,8 @@ library(ape)
 library(seqinr)
 library(DECIPHER)
 
-## Creating temporary practice file 
+#  --------------------------------------------------------------------------
+## Creating temporary practice file -----------------------------------------
 
 mito_seq <- mito_extracted[c(1:10), c(1, 7)]
   #. only included relevant columns & first 10 rows
@@ -23,8 +32,8 @@ mito_seq <- mito_seq %>%
 dat2fasta(mito_seq, "../../../data/lhf_d/output.fasta")
   #. convert to fasta file format
 
-
-##. --- Aligning using the msa package ---
+# --------------------------------------------------------------------------
+## Aligning using the msa package ------------------------------------------
 
 # system.file("tex", "texshade.sty", package="msa")
 
@@ -33,7 +42,10 @@ seq_mt
 
 algn_muscle <- msaMuscle(seq_mt)
 
-algn_ape <- msaConvert(algn_muscle, "ape::DNAbin")
+algn_ape <- msaConvert(
+  x = algn_muscle, 
+  type = "ape::DNAbin"
+  )
 
 write.FASTA(algn_ape, "../../../data/lhf_d/aln_10_muscle.fasta")
   #. this file can be read in AliView
@@ -46,14 +58,15 @@ algn_muscle2 <- msaConvert(
 d <- dist.alignment(algn_muscle2, "identity")
 
 mt_tree <- ape::nj(d)
-plot(mt_tree)
+ape::plot.phylo(mt_tree)
 
 muscle_algn2 <- ape::read.dna(
   file = "../../../data/lhf_d/aln_10_muscle.fasta", 
   format = "fasta")
 ape::checkAlignment(muscle_algn2)
 
-##. ----- Aligning using the DECIPHER package --- 
+# --------------------------------------------------------------------------
+##  Aligning using the DECIPHER package ------------------------------------ 
 
 seq_mt <- readDNAStringSet("output.fasta")   # as above
 
@@ -75,8 +88,16 @@ ape::checkAlignment(decipher_algn2)
   # bottom left:  Gaps at the start
   # bottom right: Number of nucleotides at each site
 
+decipher_dist <- ape::dist.dna(
+  x = decipher_algn2, 
+  model = "JC"
+)
 
-##. ----- Checking the MAFFT alignment ----- 
+decipher_tree <- ape::nj(decipher_dist)
+ape::plot.phylo(decipher_tree)
+
+## --------------------------------------------------------------------------
+##  Checking the MAFFT alignment -------------------------------------------- 
 
 #. Alignment completed using MAFFT of the command line: 
 #  To run in terminal:  
@@ -88,3 +109,16 @@ mafft_algn <- ape::read.dna(
 )
 
 ape::checkAlignment(mafft_algn)
+
+mafft_dist <- ape::dist.dna(
+  x = mafft_algn, 
+  model = "JC"  
+    # JC = Jukes Cantor
+    # K80 = Kimura 1980
+)
+
+mafft_tree <- ape::nj(mafft_dist)
+ape::plot.phylo(mafft_tree)
+
+
+
