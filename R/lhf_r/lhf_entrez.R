@@ -1,4 +1,4 @@
-### Project LHF - Attempting to use E-Utilities & Entrez 
+### Project LHF - Attempting to use E-Utilities & Entrez ----------------------
 #   -----------
 
 #  After unsuccessful attempts to download the required GenBank files and 
@@ -79,18 +79,77 @@ for( seq_start in seq(1,63500,50)){
   
 
 ## ---------------------------------------------------------------------------
-##.  Formatting the extracted information
+##.  Formatting the extracted information. -----------------------------------
 
 mito_extracted <- read.delim("../../../data/lhf_d/genbank_output_D.tsv")
+  #. Change this path to match your output file.
 
 #. Getting country list: 
-library(dplyr)
-world_countries <- ggplot2::map_data("world")
-world_countries <- distinct(select(world_countries, region))
-world_countries <- 
+
+country_info <- feather::read_feather(
+  "../../../data/countries_subcontinents.feather")
+  #. List of countries and subcontinents with associated cooridinate info. 
+  #. Cannot be pulled directly from GitHub (not currently possible with feather 
+  #. files)
+
+country_list <- stringr::str_flatten(
+  string = country_info$region,
+  collapse = "|"
+) 
+
+country_list <- stringr::str_c(
+  country_list, "Czechia", 
+  sep = "|"
+)
+  #. This makes a very large regular expression with all the countries. 
+
+
+mito_extracted_processed <- mito_extracted %>%
+  filter(
+    Organism == "Homo sapiens" # exclude ancient DNA for now
+  ) %>%
+  mutate(
+    Note = str_extract(
+    string  = Note, 
+    pattern = country_list
+    )
+    #. Extract names from Notes column
+  ) %>%
+  mutate(
+    Country = str_extract(
+      string  = Country, 
+      pattern = country_list
+    )
+    #. Extract names from country columns
+    #. This will remove regions/ additional geographical info
+  ) %>%
+  tidyr::unite(
+    col = country,
+    c(Country, Note), 
+    sep = "", 
+    na.rm = TRUE
+  ) %>% 
+  select(
+    Accession, country, Sequence
+  ) %>%
+  filter(
+    country != ""
+  ) %>%
+  tidyr::unite(
+    col = id,
+    c(Accession, country)
+  ) %>%
+  mutate(Sequence = str_to_upper(Sequence))
+  
+names(mito_extracted_processed) <- c("seq.name", "seq.text")
+dat2fasta(mito_extracted_processed, "../../../data/lhf_d/445_output.fasta")
+#. convert to fasta file format
+
+nrow(mito_extracted_processed)
+
 
 ## ---------------------------------------------------------------------------
-#. Extracting the information directly from NCBI
+#. Extracting the information directly from NCBI. ----------------------------
 
 mtDNA_summary <- entrez_summary(
   db = "nucleotide", 
@@ -98,7 +157,8 @@ mtDNA_summary <- entrez_summary(
 )
 mtDNA_summary
 
-subnames<- extract_from_esummary(mtDNA_summary, "subname") # retrieve values from the above summary
+subnames<- extract_from_esummary(mtDNA_summary, "subname") 
+# retrieve values from the above summary
 # taxid :  number associated with taxa (9606 = sapiens) --- no longer the case
 # subname: notes, inc. location data
 

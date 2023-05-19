@@ -32,6 +32,10 @@ mito_seq <- mito_seq %>%
 dat2fasta(mito_seq, "../../../data/lhf_d/output.fasta")
   #. convert to fasta file format
 
+##.  Alignment test set of 100 sequences... 
+
+seq_mt_100 <- readDNAStringSet("../../../data/lhf_d/100_output.fasta")
+
 # --------------------------------------------------------------------------
 ## Aligning using the msa package ------------------------------------------
 
@@ -68,16 +72,18 @@ ape::checkAlignment(muscle_algn2)
 # --------------------------------------------------------------------------
 ##  Aligning using the DECIPHER package ------------------------------------ 
 
+#. Run with 10 seq, now adapting files to run on 100
+
 seq_mt <- readDNAStringSet("output.fasta")   # as above
 
-decipher_algn <- DECIPHER::AlignSeqs(seq_mt)
+decipher_algn <- DECIPHER::AlignSeqs(seq_mt_100)
 Biostrings::writeXStringSet(
   decipher_algn, 
-  "../../../data/lhf_d/aln_10_decipher.fasta"
+  "../../../data/lhf_d/aln_100_decipher.fasta"
 )
 
 decipher_algn2 <- ape::read.dna(
-  file = "../../../data/lhf_d/aln_10_decipher.fasta",
+  file = "../../../data/lhf_d/aln_100_decipher.fasta",
   format = "fasta"
 )
 d <- dist.alignment(decipher_algn, "identity")
@@ -101,10 +107,10 @@ ape::plot.phylo(decipher_tree)
 
 #. Alignment completed using MAFFT of the command line: 
 #  To run in terminal:  
- {'bash mafft <input_file.fasta> <output_file.fasta>'}
+ {'mafft <input_file.fasta> <output_file.fasta>'}
 
 mafft_algn <- ape::read.dna(
-  file = "../../../data/lhf_d/mafft_algn.fasta",
+  file = "../../../data/lhf_d/aln_100_mafft.fasta",
   format = "fasta"
 )
 
