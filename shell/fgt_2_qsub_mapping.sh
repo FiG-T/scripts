@@ -2,12 +2,18 @@
 
 #  2 - Processing short read sequences: Aligning to the Dros reference genome
 
+################################################################################
+
 #      This script is also adapted from scripts from M.R and is the 
 #      second step in processing short read data from pooled DNA sequenced 
 #      samples. This script creates temporary directories in the Scratch repo, 
 #      and uses the Bowtie package (http://genomebiology.com/2009/10/3/R25) to 
 #      perfom an ultrafast alignment of short reads to the (specified) reference 
-#      genome.
+#      genome. 
+
+#      Modified by FiG-T (May 2023)
+
+################################################################################    
 
 #  Define the shell being used: 
 #$ -S /bin/bash 
@@ -33,13 +39,7 @@
 #  Specify task IDs: 
 #$ -t 61-90
 
-# prepare post-ru clean-up
-# fgt: silenced for now:
-# function finish {
-#    rm -rf /scratch//*
-# }
-# trap finish EXIT ERR
-
+################################################################################
 
 # Create a scratch directory for current task
 scratch_dir=$JOB_ID"."$SGE_TASK_ID
@@ -50,12 +50,12 @@ echo "Created directory $scratchpath"
 
 # Get name of ith diectory
 #  This is not really a local directory but where your raw data is stored 
-localdirectory=$(ls raw_data | awk NR==$SGE_TASK_ID)
-localpath="raw_data/"$localdirectory
-echo "Raw data path $localpath"
+datadirectory=$(ls raw_data | awk NR==$SGE_TASK_ID)
+datapath="raw_data/"$datadirectory
+echo "Data data path $datapath"
 
 # Defining the input and output filenames: 
-cd $localpath
+cd $datapath
 #  sourcing the outputs from the first script
 R1_infile=$(ls *trimmed.fq.gz | awk 'NR==1')
 R2_infile=$(ls *trimmed.fq.gz | awk 'NR==2')
@@ -63,7 +63,7 @@ R2_infile=$(ls *trimmed.fq.gz | awk 'NR==2')
 cd ../.. # (takes you back to the working directory in Scratch)
 
 
-outfile=$localdirectory"_mapped.sam"  
+outfile=$datadirectory"_mapped.sam"  
 echo "Outfile $outfile"
 
 # Copy input files to scratch
@@ -81,11 +81,24 @@ echo "Outfile $outfile"
 # echo "rsync -raz drosophila_r633_index/drosophila_r633.* $scratchpath/ref_genome/"
 # rsync -raz drosophila_r633_index/drosophila_r633.* $scratchpath/ref_genome/
 
-# run mapping
-echo "/shared/ucl/apps/bowtie2/bowtie2-2.2.5/bowtie2 --end-to-end -p 4 -x $scratchpath/ref_genome/drosophila_r633 -1 $scratchpath"/"$R1_infile -2 $scratchpath"/"$R2_infile -S $scratchpath"/"$outfile"
-/shared/ucl/apps/bowtie2/bowtie2-2.2.5/bowtie2 --end-to-end -p 4 -x ~/data/sequences/ref_genome/drosophila_r633 -1 $localpath/$R1_infile -2 $localpath/$R2_infile -S $scratchpath/$outfile
-# collect infiles directly from the raw_data scratch folder, put the outfile in 
+# Run mapping 
+#  This uses the bowtie package to map the trimmed fasta files to the 
+#  reference genome specified. 
+# '-x' specifies the index file
+# '-1' input file 1
+# '-2' input file 2
+# '-S' the file for the SAM output
+
+/shared/ucl/apps/bowtie2/bowtie2-2.2.5/bowtie2 --end-to-end -p 4 \
+  -x ~/data/sequences/ref_genome/drosophila_r633 \
+  -1 $datapath/$R1_infile -2 $datapath/$R2_infile \
+  -S $scratchpath/$outfile
+# collect infiles directly from the raw_data scratch folder (datapath), put the outfile in 
 # the temp_data scratch directory
+
+echo "/shared/ucl/apps/bowtie2/bowtie2-2.2.5/bowtie2 --end-to-end -p 4 -x \
+  $scratchpath/ref_genome/drosophila_r633 -1 $datapath"/"$R1_infile -2 \
+  $datapath"/"$R2_infile -S $scratchpath"/"$outfile"
 
 # copy results back to local directory
 # fgt: also silenced
