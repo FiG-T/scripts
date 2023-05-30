@@ -35,9 +35,6 @@
 #  Temporary scratch resource requirement
 #$ -l tscratch = 75G
 
-#  Number of (shared) parrallel environments/ processors required.
-#$ -pe smp 4
-
 #  Specify task IDs: 
 #$ -t 61-90
 
