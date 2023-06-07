@@ -23,28 +23,38 @@
 #$ -l tmpfs=10G
 
 #  Request/specify time needed/limit
-#$ -l h_rt = 00:10:0
+#$ -l h_rt=00:05:0
 
 #$ -wd /home/zcbtfgg/Scratch/t.i.m.e/sequences
    # Note: Myriad nodes cannot write files directly to the home directory
 
 #  Name the job
-#$ -N dros_ref_index_dictionary
+#$ -N dros_ref_index_dictionary_5
 
 ################################################################################
+PICARDPATH="/shared/ucl/apps/picard-tools/2.18.9"
 
 #  Copy the reference fasta into the temporary node
-cp dmel-all-chromosome-r6.51.fasta $TMPDIR
+#cp dmel-all-chromosome-r6.51.fasta $TMPDIR
 
 #  Set the directory to the temporary node.
-cd $TMPDIR
+#cd $TMPDIR
 
 #  Use Picard tools to create the .dict file: 
 #  'R' : input file,  'O' : output file
 /shared/ucl/apps/java/jdk1.8.0_92/bin/java -jar $PICARDPATH/picard.jar \
-  CreateSequenceDirectory \
-  R=dmel-all-chromosome-r6.51.fasta O=dmel-all-chromosome-r6.51.fasta.dict 
+  CreateSequenceDictionary \
+  R=dmel-all-chromosome-r6.51.fasta \
+  O=dmel-all-chromosome-r6.51.fasta.dict
+
+echo "/shared/ucl/apps/java/jdk1.8.0_92/bin/java -jar $PICARDPATH/picard.jar"
 
 #  Use Samtools to index the fasta file
 /shared/ucl/apps/samtools/1.9/gnu-4.9.2/bin/samtools faidx \
   dmel-all-chromosome-r6.51.fasta 
+
+echo "/shared/ucl/apps/samtools/1.9/gnu-4.9.2/bin/samtools faidx"
+
+# Sync TMPDIR and home directory
+
+#rsync -raz $TMPDIR ~/Scratch/t.i.m.e/sequences
