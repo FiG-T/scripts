@@ -142,7 +142,7 @@ mito_extracted_processed <- mito_extracted %>%
   mutate(Sequence = str_to_upper(Sequence))
   
 names(mito_extracted_processed) <- c("seq.name", "seq.text")
-dat2fasta(mito_extracted_processed, "../../../data/lhf_d/445_output.fasta")
+dat2fasta(mito_extracted_processed[c(1:100),], "../../../data/lhf_d/100_output.fasta")
 #. convert to fasta file format
 
 nrow(mito_extracted_processed)
