@@ -19,19 +19,19 @@
 #$ -S /bin/bash 
 
 #  Request 'hard virtual memory' space:
-#$ -l h_vmem = 500M
+#$ -l h_vmem=500M
 
 #  Request 'transcendent memory' space
-#$ -l tmem = 500M
+#$ -l tmem=500M
 
 #  Request/specify time needed/limit
-#$ -l h_rt = 4:00:0
+#$ -l h_rt=4:00:0
 
 #$ -wd /home/zcbtfgg/Scratch/t.i.m.e/sequences
    # Note: Myriad cannot write files directly to the home directory
 
 #  Temporary scratch resource requirement
-#$ -l tscratch = 15G
+#$ -l tscratch=15G
 
 #  Number of (shared) parrallel environments/ processors required.
 #$ -pe smp 4
@@ -52,7 +52,7 @@ echo "Created directory $scratchpath"
 #  This is not really a local directory but where your raw data is stored 
 datadirectory=$(ls raw_data | awk NR==$SGE_TASK_ID)
 datapath="raw_data/"$datadirectory
-echo "Data data path $datapath"
+echo "Data path $datapath"
 
 # Defining the input and output filenames: 
 cd $datapath
