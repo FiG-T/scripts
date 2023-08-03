@@ -21,13 +21,13 @@
 #$ -S /bin/bash 
 
 #  Request RAM required 
-#$ -l mem=20G
+#$ -l mem=70G
 
 # Request TMPDIR space
-#$ -l tmpfs=20G
+#$ -l tmpfs=25G
 
 #  Request/specify time needed/limit
-#$ -l h_rt=01:30:0
+#$ -l h_rt=10:00:0
 
 #$ -wd /home/zcbtfgg/Scratch/t.i.m.e/sequences
    # Note: Myriad nodes cannot write files directly to the home directory
@@ -36,7 +36,8 @@
 #$ -pe smp 10
 
 # Specify task IDs
-#$ -t 8
+#$ -t 8 
+# 8 = the number for my test file in the directory list
 
 #####  figt: silenced (for running on computer science cluster)
 #  Request 'hard virtual memory' space:
@@ -62,12 +63,12 @@ echo "$outfile"
 
 # once in the sample-specific subfolder - call BWA mem 
 /shared/ucl/apps/bwa/0.7.12/gnu-4.9.2/bwa mem \
-  -t 2 \
+  -t 10 \
  ../../dmel-all-chromosome-r6.51.fa \
   *R1_trimmed.fastq.gz *R2_trimmed.fastq.gz > "$outfile"
 
 echo "/shared/ucl/apps/bwa/0.7.12/gnu-4.9.2/bwa mem \
-  -t 2 \
+  -t 10 \
   ../../dmel-all-chromosome-r6.51.fa \
   *R1_trimmed.fastq.gz *R2_trimmed.fastq.gz > $outfile
   "
