@@ -1,0 +1,305 @@
+---
+title: "Thermal Tolerance Pilot Experiments"
+output: 
+  html_document: 
+    keep_md: yes
+author: "FiG-T"
+date: "2023-08-29"
+editor_options: 
+  markdown: 
+    wrap: 80
+---
+
+## Introduction
+
+While the T.I.M.E project will primarily focus on genetic changes through time,
+it has the potential to provide insight into associated phenotypic changes.\
+This will require regular (every 4 months) measurements of fitness in each of
+the populations. Given the large number of populations (16 as of Aug 2023) many
+of the standard fitness assays (lifespan, activity) are not pragmatically
+feasible. Included among the list of unsuitable fitness assays are the
+"conventional" heat and cold tolerance assays (CT-50, CCRT, Tmax) which require
+assessment of individual flies and hence large amounts of time and manual
+effort.
+
+To bypass these issues and enable the efficient generation of larger volumes of
+data a different protocol has been suggested: Survival, measured 2 hours and 24
+hours post thermal-treatment. Such methods have been used to assess differences
+between *species*, however whether this could be used to identify variation
+between (closely related) populations has not been previously explored (to the
+best of my knowledge).
+
+These Pilot experiments thus aim to identify:
+
+1.  Whether survival can be used to discriminate between closely related
+    *Drosophila melanogaster* populations.
+
+2.  What temperatures (hot and cold) are required to differentiate the
+    populations.
+
+3.  What duration of treatments (hot and cold) are required to differentiate the
+    populations.
+
+Additionally, the following secondary objectives have been set:
+
+1.  Does the presence of food in the vials impact survival? (for cold assays)
+
+2.  Does the use of a water-bath impact survival for cold assays?
+
+## Experimental methods
+
+### Fly sorting
+
+1.  Leave mated flies to lay eggs on a petri dish for 4-12 hours (depending on
+    the number of flies), then remove the adults (no longer needed).
+
+2.  Cut small squares with eggs on from the petri dish and transfer to new empty
+    vials with standard sugar yeast food.
+
+3.  Allow flies to develop, emerge and mate (for 48h).
+
+4.  Using 5ppm CO~2~ knock out the flies and separate the sexes.
+
+5.  Transfer 10 flies (of a single sex) to a new vial with food and leave to
+    recover for 48h. Repeat for the number of desired replicates.
+
+### Heat Assay
+
+1.  Preheat a water-bath[^1] to the desired temperature.
+
+2.  Transfer the flies (see above for setup) into new **labelled** empty (glass)
+    vials. (Extra tall vials were used here).
+
+3.  Record the number of flies alive in each vial.
+
+4.  Simultaneously transfer the vials to the water-bath, ensuring that the
+    bottom of the vials are submerged and that the vials are plugged in such a
+    way to ensure that the flies cannot escape the heated section of the tube.
+
+5.  Leave the vials for the specified amount of time.
+
+6.  Remove the vials from the water-bath and leave to cool at room temperature.
+
+7.  After 2 hours (from when they were removed from the heat) record the number
+    of surviving flies in each vial.
+
+8.  After 24 hours, recount and record the number of survivors in each vial.
+
+[^1]: Note: a water-bath will likely give significantly different results to an
+    incubator.
+
+### Cold Assay
+
+1.  If using an ice treatment - set this up by transferring ice to a watertight
+    icebox and covering with a salt solution (125g table salt per 1 litre RO
+    water). This should be of a slushy consistency.
+
+2.  Transfer the flies (see above for setup) into new **labelled** empty (glass)
+    vials. (Extra tall vials were used here). Skip this stage for flies in the
+    food treatment group.
+
+3.  Record the number of flies alive in each vial.
+
+4.  If using an ice-bath; seal the vials inside a watertight Ziploc bag.
+
+5.  Transfer all the vials to the cold environment (Cold Control Temperature
+    room, \~5ºC used for this pilot). If testing different time limits, this
+    step can be staggered.
+
+6.  Leave in the cold environment for the specified amount of time.
+
+7.  Remove the vials and return to room temperature.
+
+8.  After 2 hours, record the number of *moving* flies (which are visibly no
+    longer in the chill-coma or dead).
+
+9.  After 24 hours, record the number of *moving* flies (which are visibly no
+    longer in the chill-coma or dead).
+
+### Treatment conditions used
+
+####For heat:
+
+| Temperature (ºC) | 10 min | 30 min | 60 min | 16 hours (overnight) | Custom                   |
+|--------------|--------------|--------------|--------------|--------------|--------------|
+| 28.5             |        |        |        | 2                    |                          |
+| 30               |        |        |        | 1                    |                          |
+| 33               | 2      |        |        |                      |                          |
+| 35               |        |        | 1      |                      |                          |
+| 35.5             | 2      | 2      |        |                      |                          |
+| 36.5             | 3      |        |        |                      |                          |
+| 37               | 2 , 3  | 2      |        |                      |                          |
+| 37.5             | 3      |        |        |                      |                          |
+| 38.5             | 2      | 2      |        |                      |                          |
+| 40               |        |        | 1      |                      | sexes till drop, 25 min. |
+
+: Representation of temperatures and timings tested. Number indicates lay used.
+1 & 2 are from stock population 2, lay 3 derive from stock population 1. Blank
+spaces indicate that the temperature time combination was not tested.
+
+####For Cold:
+
+| Temperature (ºC) | 22 hours | 24 hours | 25 hours   | 26 hours | 28 hours |
+|------------------|----------|----------|------------|----------|----------|
+| 5 + ice (\~1)    | 1        | 1        | 1          |          |          |
+| 5                | 1^f^     | 1        | 1, 2^f, w^ | 1        | 1        |
+
+: Representation of the cold temperatures and timings used. Number indicates lay
+used for the run. 1 and 3 derive from stock populations 2 and 1 respectively.
+Blank spaces indicate the combination was not included in the pilot. f and w
+represent that additional tests were taken with vials containing food ( ^f^ ) or
+within a water bath (^w^).
+
+## Analysis and results
+
+### Data processing and formats
+
+Survival was recorded for each vial and written into an excel document with the
+following columns:
+
+-   **genotype**: the genetic background of the line
+-   **sex**
+-   **replicate**: per experimental group
+-   **lay**: the date on which the eggs were laid
+-   **batch**: corresponding to the three different days on which experiments
+    were conducted.
+-   **food**: whether the treatment vial contained food (y) or was empty (n). i
+    indicates a cold water bath was used (with empty vials).
+-   **temperature:** the temperature in ºC of the thermal treatment
+-   **time**: the duration of time spent at the experimental temperature **in
+    minutes**
+-   **start_no**: The number of alive individuals in the vial before any thermal
+    treatments have been applied.
+-   **post_treatment**: The number of alive individuals in the vial 2 hours
+    after the thermal treatment has ended.
+-   **final_survival:** The number of alive individuals 24 hours after the
+    thermal treatment has ended.
+
+This was imported into R:
+
+```{r import data, echo = FALSE}
+assay <- readxl::read_excel(
+  path = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/data/time_fitness/Pilot_heat_tolerance.xlsx"
+) # note this path links to a personal directory
+```
+
+As there are different initial numbers of flies in each vial, the absolute
+number of flies is not accurately informative. Instead, survival fractions are
+calculated:
+
+```{r calculate fractions, echo = FALSE}
+library(dplyr)
+assay <- assay %>%
+  mutate(
+    per_post = post_treatment / start_no # 2h survival / start number
+  ) %>%
+  mutate( 
+    per_final= final_survival / start_no # 24h survival / start number
+  )
+```
+
+This appends two columns, `per_post` (fraction alive 2h post treatment) and
+`per_final` (fraction alive 24h after treatment) to the data set.
+
+To ensure the variables are in convenient formats for later grouping and
+plotting, some are converted into factors:
+
+```{r factor creation, echo = FALSE}
+assay$temperature <- as.factor(assay$temperature)
+assay$time <- as.factor(assay$time)
+assay$batch <- as.factor(assay$batch)
+```
+
+### Summarising the data
+
+Summaries of the data are subsequently used for convenient later plots.
+
+```{r summaries, echo = FALSE, message = TRUE}
+assay_summary <- assay %>%
+  dplyr::group_by(
+    genotype, sex, batch, temperature, time, food 
+  ) %>%
+  dplyr::summarise(
+    N = length(start_no), # the number of replicates per treatment group
+    mean_post = mean(     # the mean survival after 2h 
+      per_post, na.rm = TRUE
+    ),
+    sd_post = sd(per_post, na.rm = TRUE), # standard deviation in 2h survival
+    se_post = sd_post/sqrt(N), # standard error of the mean in 2h survival
+    mean_final = mean( 
+      per_final,  # mean survival after 24h 
+      na.rm = TRUE
+    ),
+    sd_final = sd(per_final, na.rm = TRUE), # standard deviation in 24h survival
+    se_final = sd_final/sqrt(N)  # standard error of the mean in 24h survival
+  )
+```
+
+### Plots - Heat shock tolerance
+
+**Note** this is a pilot study and as such the following figures are accordingly
+rough / unpolished.
+
+#### Looking at an overview:
+
+The following plot shows an overview of all the heat thermal tolerance
+experiments.
+
+```{r heat overview, echo = FALSE, warning = FALSE, fig.cap= "Panel columns show the temperature:time combinations (minutes):(ºC), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h"}
+
+library(ggplot2)
+
+assay_summary %>%
+   filter(food == "n") %>%
+   filter(temperature != 5 ) %>%  # remove low temperatures 
+   filter(temperature != 1 ) %>%
+  # filter(time == 30) %>%
+  ggplot2::ggplot(
+  mapping = ggplot2::aes(
+    x = sex,
+    y = mean_post,
+    shape = sex,
+    colour = genotype
+    )
+  ) +
+  ggplot2::geom_point(
+    position = ggplot2::position_dodge(0.5),
+    size = 3
+  ) +
+  ggplot2::labs(
+    y = "Survival fraction"
+  ) +
+  ggplot2::geom_errorbar(
+    mapping = ggplot2::aes(
+      ymin = mean_post-se_post,  # plotting the standard errors
+      ymax = mean_post+se_post,
+      width = 0.3
+    ),
+    position = ggplot2::position_dodge(0.5)
+  ) +
+  geom_point(
+    mapping = ggplot2::aes(
+      y = mean_final,
+      alpha = 0.8,  # paler points are the 24h survival 
+      size = 2
+    ),
+    position = position_dodge(0.4)
+  ) +
+  ggplot2::geom_errorbar(
+    mapping = ggplot2::aes(
+      ymin = mean_final-se_final,
+      ymax = mean_final+se_final,
+      width = 0.2,
+      alpha = 0.8
+    ),
+    position = ggplot2::position_dodge(0.4)
+  )+
+  ggplot2::facet_grid(
+    cols = vars(temperature:time),
+    rows = vars(batch)
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
+  ) +
+  ggplot2::theme_bw()
+```
