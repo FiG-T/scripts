@@ -3,9 +3,9 @@ title: "Thermal Tolerance Pilot Experiments"
 author: "FiG-T"
 date: "2023-08-29"
 output:
-  pdf_document: default
   html_document:
     keep_md: yes
+  pdf_document: default
 editor_options:
   markdown:
     wrap: 80
@@ -178,26 +178,13 @@ following columns:
 
 This was imported into R:
 
-```{r import data, echo = FALSE}
-assay <- readxl::read_excel(
-  path = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/data/time_fitness/Pilot_heat_tolerance.xlsx"
-) # note this path links to a personal directory
-```
+
 
 As there are different initial numbers of flies in each vial, the absolute
 number of flies is not accurately informative. Instead, survival fractions are
 calculated:
 
-```{r calculate fractions, echo = FALSE, message = FALSE}
-library(dplyr)
-assay <- assay %>%
-  mutate(
-    per_post = post_treatment / start_no # 2h survival / start number
-  ) %>%
-  mutate( 
-    per_final= final_survival / start_no # 24h survival / start number
-  )
-```
+
 
 This appends two columns, `per_post` (fraction alive 2h post treatment) and
 `per_final` (fraction alive 24h after treatment) to the data set.
@@ -205,35 +192,16 @@ This appends two columns, `per_post` (fraction alive 2h post treatment) and
 To ensure the variables are in convenient formats for later grouping and
 plotting, some are converted into factors:
 
-```{r factor creation, echo = FALSE, message = FALSE}
-assay$temperature <- as.factor(assay$temperature)
-assay$time <- as.factor(assay$time)
-assay$batch <- as.factor(assay$batch)
-```
+
 
 ### Summarising the data
 
 Summaries of the data are subsequently used for convenient later plots.
 
-```{r summaries, echo = FALSE, message = TRUE}
-assay_summary <- assay %>%
-  dplyr::group_by(
-    genotype, sex, batch, temperature, time, food 
-  ) %>%
-  dplyr::summarise(
-    N = length(start_no), # the number of replicates per treatment group
-    mean_post = mean(     # the mean survival after 2h 
-      per_post, na.rm = TRUE
-    ),
-    sd_post = sd(per_post, na.rm = TRUE), # standard deviation in 2h survival
-    se_post = sd_post/sqrt(N), # standard error of the mean in 2h survival
-    mean_final = mean( 
-      per_final,  # mean survival after 24h 
-      na.rm = TRUE
-    ),
-    sd_final = sd(per_final, na.rm = TRUE), # standard deviation in 24h survival
-    se_final = sd_final/sqrt(N)  # standard error of the mean in 24h survival
-  )
+
+```
+## `summarise()` has grouped output by 'genotype', 'sex', 'batch', 'temperature',
+## 'time'. You can override using the `.groups` argument.
 ```
 
 ### Plots - Heat shock tolerance
@@ -246,64 +214,7 @@ rough / unpolished.
 The following plot shows an overview of all the heat thermal tolerance
 experiments.
 
-```{r heat_overview, echo = FALSE, warning = FALSE, fig.cap= "Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h"}
-
-library(ggplot2)
-
-assay_summary %>%
-   filter(food == "n") %>%
-   filter(temperature != 5 ) %>%  # remove low temperatures 
-   filter(temperature != 1 ) %>%
-  # filter(time == 30) %>%
-  ggplot2::ggplot(
-  mapping = ggplot2::aes(
-    x = sex,
-    y = mean_post,
-    shape = sex,
-    colour = genotype
-    )
-  ) +
-  ggplot2::geom_point(
-    position = ggplot2::position_dodge(0.5),
-    size = 3
-  ) +
-  ggplot2::labs(
-    y = "Survival fraction"
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_post-se_post,  # plotting the standard errors
-      ymax = mean_post+se_post,
-      width = 0.3
-    ),
-    position = ggplot2::position_dodge(0.5)
-  ) +
-  geom_point(
-    mapping = ggplot2::aes(
-      y = mean_final,
-      alpha = 0.8,  # paler points are the 24h survival 
-      size = 2
-    ),
-    position = position_dodge(0.4)
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_final-se_final,
-      ymax = mean_final+se_final,
-      width = 0.2,
-      alpha = 0.8
-    ),
-    position = ggplot2::position_dodge(0.4)
-  )+
-  ggplot2::facet_grid(
-    cols = vars(temperature:time),
-    rows = vars(batch)
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
-  ) +
-  ggplot2::theme_bw()
-```
+![Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h](pilot_thermal_writeup_files/figure-html/heat_overview-1.png)
 
 #### Batch 1
 
@@ -313,61 +224,7 @@ overnight (1080 mins) or for 60 minutes at a higher temperature. Aside from 35º
 for 60 minutes, all treatments resulted in 0% survival in all groups, as shown
 below.
 
-```{r heat_batch1, echo = FALSE, warnings = FALSE}
-assay_summary %>%
-   filter(food == "n") %>%
-   filter(batch == 1 ) %>%
-   filter(temperature != 5 ) %>%
-   filter(temperature != 1 ) %>%
-  ggplot2::ggplot(
-  mapping = ggplot2::aes(
-    x = sex,
-    y = mean_post,
-    shape = sex,
-    colour = genotype
-    )
-  ) +
-  ggplot2::geom_point(
-    position = ggplot2::position_dodge(0.5),
-    size = 3
-  ) +
-  ggplot2::labs(
-    y = "Survival fraction"
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_post-se_post,
-      ymax = mean_post+se_post,
-      width = 0.3
-    ),
-    position = ggplot2::position_dodge(0.5)
-  ) +
-  geom_point(
-    mapping = ggplot2::aes(
-      y = mean_final,
-      alpha = 0.8,
-      size = 2
-    ),
-    position = position_dodge(0.4)
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_final-se_final,
-      ymax = mean_final+se_final,
-      width = 0.2,
-      alpha = 0.8
-    ),
-    position = ggplot2::position_dodge(0.4)
-  )+
-  ggplot2::facet_grid(
-    cols = vars(temperature:time),
-    rows = vars(batch)
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
-  ) +
-  ggplot2::theme_bw()
-```
+![](pilot_thermal_writeup_files/figure-html/heat_batch1-1.png)<!-- -->
 
 Given the complete mortality observed here, it was decided to use much shorter
 treatment durations going forward.
@@ -377,59 +234,7 @@ treatment durations going forward.
 Batch 2 are derived from the Population 2 stocks. This covered a wide range of
 temperatures and times to gauge the approximate range.
 
-```{r heat_batch2, echo=FALSE, warning = FALSE, fig.cap = "Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h"}
-assay_summary %>%
-   filter(food == "n") %>%
-   filter(batch == 2 ) %>%
-  ggplot2::ggplot(
-  mapping = ggplot2::aes(
-    x = sex,
-    y = mean_post,
-    shape = sex,
-    colour = genotype
-    )
-  ) +
-  ggplot2::geom_point(
-    position = ggplot2::position_dodge(0.5),
-    size = 3
-  ) +
-  ggplot2::labs(
-    y = "Survival fraction"
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_post-se_post,
-      ymax = mean_post+se_post,
-      width = 0.3
-    ),
-    position = ggplot2::position_dodge(0.5)
-  ) +
-  geom_point(
-    mapping = ggplot2::aes(
-      y = mean_final,
-      alpha = 0.8,
-      size = 2
-    ),
-    position = position_dodge(0.4)
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_final-se_final,
-      ymax = mean_final+se_final,
-      width = 0.2,
-      alpha = 0.8
-    ),
-    position = ggplot2::position_dodge(0.4)
-  )+
-  ggplot2::facet_grid(
-    cols = vars(temperature:time),
-    rows = vars(batch)
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
-  ) +
-  ggplot2::theme_bw()
-```
+![Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h](pilot_thermal_writeup_files/figure-html/heat_batch2-1.png)
 
 This suggests that 37ºC is the approximate temperature which allows for
 differentiation of the genotypes within each sex. Lower temperatures fail to
@@ -443,59 +248,7 @@ survival in all groups to comparable levels.
 Building upon the findings from Batch 2, Batch 3 had a more focused temperature
 range (36.5-37.5 with 0.5ºC increments) with larger sample sizes.
 
-```{r heat_batch3, echo = FALSE, warning = FALSE, fig.cap = "Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h"}
-assay_summary %>%
-   filter(batch == 3 ) %>%
-   filter(temperature != 5 ) %>%
-  ggplot2::ggplot(
-  mapping = ggplot2::aes(
-    x = sex,
-    y = mean_post,
-    shape = sex,
-    colour = genotype
-    )
-  ) +
-  ggplot2::geom_point(
-    position = ggplot2::position_dodge(0.5),
-    size = 3
-  ) +
-  ggplot2::labs(
-    y = "Survival fraction"
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_post-se_post,
-      ymax = mean_post+se_post,
-      width = 0.3
-    ),
-    position = ggplot2::position_dodge(0.5)
-  ) +
-  geom_point(
-    mapping = ggplot2::aes(
-      y = mean_final,
-      alpha = 0.8,
-      size = 2
-    ),
-    position = position_dodge(0.4)
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_final-se_final,
-      ymax = mean_final+se_final,
-      width = 0.2,
-      alpha = 0.8
-    ),
-    position = ggplot2::position_dodge(0.4)
-  )+
-  ggplot2::facet_grid(
-    cols = vars(temperature:time),
-    rows = vars(batch)
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
-  ) +
-  ggplot2::theme_bw()
-```
+![Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number (1 & 2 originate from the same source population). Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h](pilot_thermal_writeup_files/figure-html/heat_batch3-1.png)
 
 These results replicate the findings from Batch 2 and confirm that 37ºC results
 in identifiable differences between the populations within each sex. 37.5ºC
@@ -509,62 +262,7 @@ assays.**
 The following plot shows the results of the different thermal tolerance
 treatments:
 
-```{r cold_overview, echo = FALSE, warning = FALSE, fig.cap = "Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number. Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h"}
-assay_summary %>%
-  filter(temperature == 1 | temperature == 5) %>%
-  filter(food == "n") %>%
-  ggplot2::ggplot(
-  mapping = ggplot2::aes(
-    x = sex,
-    y = mean_post,
-    shape = sex,
-    colour = genotype
-    )
-  ) +
-  ggplot2::geom_point(
-    position = ggplot2::position_dodge(0.5),
-    size = 3
-  ) +
-  ggplot2::labs(
-    y = "Survival fraction"
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_post-se_post,
-      ymax = mean_post+se_post,
-      width = 0.3
-    ),
-    position = ggplot2::position_dodge(0.5)
-  ) +
-  geom_point(
-    mapping = ggplot2::aes(
-      y = mean_final,
-      alpha = 0.8,
-      size = 2
-    ),
-    position = position_dodge(0.4)
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_final-se_final,
-      ymax = mean_final+se_final,
-      width = 0.2,
-      alpha = 0.8
-    ),
-    position = ggplot2::position_dodge(0.4)
-  )+
-  ggplot2::facet_grid(
-    cols = vars(temperature:time),
-    rows = vars(batch)
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
-  ) +
-  ggplot2::theme_bw() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-```
+![Panel columns show the temperature:time combinations (ºC):(minutes), panel rows show the batch number. Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h](pilot_thermal_writeup_files/figure-html/cold_overview-1.png)
 
 This plot shows that on ice survival is 0% across all groups (first 3 plots on
 top row). Differences between groups are observed for each of the runs at 5ºC,
@@ -587,63 +285,7 @@ control empty vials (n), as used in all the other temperature assays.
 [^2]: I cannot remember why I chose "i" to represent this... your guess is as
     good as mine.
 
-```{r cold_secondary, echo = FALSE, warning = FALSE, fig.cap = "Panel columns show the temperature:time:batch combinations (ºC):(minutes), panel rows show the treatment. i = water-bath, n = no food (empty vial), y = yes food (standard vial with food used).  Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h"}
-assay_summary %>%
-  filter(temperature == 1 & time == 1320 | 
-         temperature == 5 & time == 1500 & batch == 3) %>%
-  ggplot2::ggplot(
-  mapping = ggplot2::aes(
-    x = sex,
-    y = mean_post,
-    shape = sex,
-    colour = genotype
-    )
-  ) +
-  ggplot2::geom_point(
-    position = ggplot2::position_dodge(0.5),
-    size = 3
-  ) +
-  ggplot2::labs(
-    y = "Survival fraction"
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_post-se_post,
-      ymax = mean_post+se_post,
-      width = 0.3
-    ),
-    position = ggplot2::position_dodge(0.5)
-  ) +
-  geom_point(
-    mapping = ggplot2::aes(
-      y = mean_final,
-      alpha = 0.8,
-      size = 2
-    ),
-    position = position_dodge(0.4)
-  ) +
-  ggplot2::geom_errorbar(
-    mapping = ggplot2::aes(
-      ymin = mean_final-se_final,
-      ymax = mean_final+se_final,
-      width = 0.2,
-      alpha = 0.8
-    ),
-    position = ggplot2::position_dodge(0.4)
-  )+
-  ggplot2::facet_grid(
-    cols = vars(temperature:time:batch),
-    rows = vars(food)
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c("deepskyblue2", "firebrick3", "deepskyblue2")
-  ) +
-  ggplot2::theme_bw(
-  ) +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-```
+![Panel columns show the temperature:time:batch combinations (ºC):(minutes), panel rows show the treatment. i = water-bath, n = no food (empty vial), y = yes food (standard vial with food used).  Points show mean values, errors bars show +/- standard errors. Paler points represent survival after 24h](pilot_thermal_writeup_files/figure-html/cold_secondary-1.png)
 
 The use of a water bath appears to have no effect on male survival but decreases
 female survival at the 2h time-point. Differences in females between survival at
