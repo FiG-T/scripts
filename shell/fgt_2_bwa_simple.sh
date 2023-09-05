@@ -21,22 +21,22 @@
 #$ -S /bin/bash 
 
 #  Request RAM required 
-#$ -l mem=70G
+#$ -l mem=40G
 
 # Request TMPDIR space
-#$ -l tmpfs=25G
+#$ -l tmpfs=40G
 
 #  Request/specify time needed/limit
-#$ -l h_rt=10:00:0
+#$ -l h_rt=20:00:0
 
 #$ -wd /home/zcbtfgg/Scratch/t.i.m.e/sequences
    # Note: Myriad nodes cannot write files directly to the home directory
 
 #  Number of (shared) parrallel environments/ processors required.
-#$ -pe smp 10
+#$ -pe smp 12
 
 # Specify task IDs
-#$ -t 8 
+#$ -t 2-7 
 # 8 = the number for my test file in the directory list
 
 #####  figt: silenced (for running on computer science cluster)
@@ -58,19 +58,23 @@ cd "$datapath"
 echo "cd $datapath"
 
 # specify output file name: 
-outfile=$datadirectory"__mapped.sam" 
+outfile=$datadirectory"_mapped_sorted.bam" 
 echo "$outfile"
 
 # once in the sample-specific subfolder - call BWA mem 
 /shared/ucl/apps/bwa/0.7.12/gnu-4.9.2/bwa mem \
   -t 10 \
  ../../dmel-all-chromosome-r6.51.fa \
-  *R1_trimmed.fastq.gz *R2_trimmed.fastq.gz > "$outfile"
+  *R1_trimmed.fastq.gz *R2_trimmed.fastq.gz \
+  | /shared/ucl/apps/samtools/1.9/gnu-4.9.2/bin/samtools sort \
+  -@10 -o $outfile
 
 echo "/shared/ucl/apps/bwa/0.7.12/gnu-4.9.2/bwa mem \
   -t 10 \
   ../../dmel-all-chromosome-r6.51.fa \
-  *R1_trimmed.fastq.gz *R2_trimmed.fastq.gz > $outfile
+  *R1_trimmed.fastq.gz *R2_trimmed.fastq.gz > \
+  | /shared/ucl/apps/samtools/1.9/gnu-4.9.2/bin/samtools sort \
+  -@10 -o $outfile
   "
 
 cd ../..
