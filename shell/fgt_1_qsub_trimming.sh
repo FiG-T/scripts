@@ -18,19 +18,19 @@
 #$ -S /bin/bash 
 
 #  Request RAM required 
-#$ -l mem=1G
+#$ -l mem=20G
 
 # Request TMPDIR space
-#$ -l tmpfs=1G
+#$ -l tmpfs=20G
 
 #  Request/specify time needed/limit
-#$ -l h_rt=0:20:0
+#$ -l h_rt=08:00:00
 
 #$ -wd /home/zcbtfgg/Scratch/t.i.m.e/sequences
    # Note: Myriad nodes cannot write files directly to the home directory
 
 #  Specify task IDs: 
-#$ -t 2
+#$ -t 2-7
 
 #  Silenced : (only for use on computer science cluster)
 #  Request 'hard virtual memory' space:
@@ -47,6 +47,8 @@
 ################################################################################
 
 #source /shared/ucl/apps/python/bundles/python39-6.0.0/venv/bin/python3
+# load python3
+module load python3/recommended
 
 #  Move to ith diectory
 directory=$(ls raw_data | awk NR==$SGE_TASK_ID)
@@ -80,7 +82,7 @@ echo "$R1_outfile"
 #  '-o' specifies the output file for the first read in a paired-end seq dataset.
 #  '-p' specifies the output file for the second read in a paired-end seq dataset.
 #/shared/ucl/apps/python/bundles/python39-6.0.0/venv/bin/
-module load python3/recommended
+
 cutadapt -a \
   AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTAGATCTCGGTGGTCGCCGTATCATT -A \
   CAAGCAGAAGACGGCATACGTGATAGTCATCCGTGACTGGAGTTCAGACGTGTGCTCTTCCGATC -q 10 \
