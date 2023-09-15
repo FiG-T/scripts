@@ -1,0 +1,30 @@
+# Looking to use vcftools to investigate vcf quality 
+
+## Running on the command line... 
+
+## output a vcf with a minor allele frequency of 0.05: 
+vcftools --vcf snp_sites_msa_filtered_converted_09_2023.vcf --maf 0.05 --recode --out snp_sites_filtered_vcf_maf0.05_092023
+###  = 52 SNPs post filtering
+vcftools --vcf snp_sites_msa_filtered_converted_09_2023.vcf --maf 0.005 --recode --out snp_sites_filtered_vcf_maf0.005_092023
+### = 442 SNPs returned
+
+## Looking at the 0.005 maf cutoff sites...
+
+## To calculate the allele frequency:
+vcftools --vcf snp_sites_filtered_vcf_maf0.005_092023.recode.vcf --freq --out ./lhf_allele_freq --max-alleles 3
+### this will include information about the frequencies
+
+vcftools --vcf snp_sites_filtered_vcf_maf0.005_092023.recode.vcf --freq2 --out ./lhf_allele_freq_nobase --max-alleles 3
+### this will exlude information about the allele frequencies 
+
+
+### To calculate the proportion of missing data per sample 
+vcftools --vcf snp_sites_filtered_vcf_maf0.005_092023.recode.vcf --missing-indv --out ./missing_indv
+
+### To calculate the proportion of missing data per site 
+vcftools --vcf snp_sites_filtered_vcf_maf0.005_092023.recode.vcf --missing-site --out ./missing_site
+
+
+
+## output a vcf with a minor allele count between 0 and 10: 
+vcftools --vcf snp_sites_msa_filtered_converted_09_2023.vcf --max-mac 5 --recode --out filtered_vcf_maxmac5_092023
