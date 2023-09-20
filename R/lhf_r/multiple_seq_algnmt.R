@@ -161,9 +161,15 @@ ape::plot.phylo(mafft_tree)
 # called (with all other sequences thus having a gap at this point).  To improve
 # the alignment, these problem sequences should be identified and removed. 
 
+# This filtering process should be repeated until there is stability in the 
+# sequences.
+
 mafft_algn <- Biostrings::readDNAStringSet(
-  file = "~/Documents/data/lhf_d/aln_mafft_incRef_2_09_2023.fasta"
+  file = "~/Documents/data/lhf_d/aln_mafft_incRef_filtered_09_2023.fasta"
 )
+ # round 1 input: "~/Documents/data/lhf_d/fasta/aln_mafft_incRef_2_09_2023.fasta"
+ # round 2 input: "~/Documents/data/lhf_d/aln_mafft_incRef_filtered_09_2023.fasta"
+
 # Convert to a matrix 
 algn_matrix <-  as.matrix(mafft_algn)
 
@@ -199,16 +205,18 @@ gap_points <- which(
 outlier_sequences <- rownames(algn_matrix)[which(
   rowSums(
     algn_matrix[, c(gap_points)] == '-'
-  ) != 360
+  ) != 8 # this number should equal the number of positions in gap_points
 )]
 
 outlier_sequences <- algn_matrix[, c(gap_points)]
 outlier_sequences <- rowSums(outlier_sequences == '-')
-outlier_sequences <- which(outlier_sequences != 360)
+outlier_sequences <- which(outlier_sequences != 8) # this should too ^
 
 outlier_sequences <- as.vector(names(outlier_sequences))
 
-# reading in the original fasta file...
+## If you are NOT on the first round, skip to below...
+##
+# reading in the original fasta file...(if on the first round...)
 og_fasta <- seqinr::read.fasta(
   file = "~/Documents/data/lhf_d/complete_output_09.2023.fasta"
 )
@@ -222,3 +230,21 @@ seqinr::write.fasta(
   names = names(filtered_fasta), 
   file = "~/Documents/data/lhf_d/complete_output_filtered_09.2023.fasta"
 )  # then re-align this file... (using MAFFT)
+
+## Skip to here ....
+
+# reading in the latest fasta file...
+og_fasta <- seqinr::read.fasta(
+  file = "~/Documents/data/lhf_d/fasta/complete_output_filtered_09.2023.fasta"
+)
+
+# filter out the outlier sequences defined above:
+filtered_fasta <- og_fasta[-which(names(og_fasta) %in% outlier_sequences)]
+
+# Write the filtered FASTA file
+seqinr::write.fasta(
+  sequences = filtered_fasta, 
+  names = names(filtered_fasta), 
+  file = "~/Documents/data/lhf_d/fasta/complete_output_filtered_2_09.2023.fasta"
+)  # then re-align this file... (using MAFFT)
+

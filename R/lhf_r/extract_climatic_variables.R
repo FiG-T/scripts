@@ -1,18 +1,20 @@
 ##   ----------------- Extracting Environmental Variables ----------------------
 
 #    This script is designed to import environmental variables for a given list 
-#    of countries.  This should be joined with the sample names (see 
-#    vcf_processing.R) to create a pair of files that can be used to identify 
-#    correlations and run PGLS analysis. 
+#    of countries.  This results in a metadata file be joined with the sample
+#    names (see vcf_processing.R) to create a pair of files that can be used to 
+#    identify correlations and run PGLS analysis. 
 
 #    ---------------------------------------------------------------------------
 
 ##   Libraries required ----
 
 if (!require("geodata")) install.packages("geodata")
-
+if (!require("tidyterra")) install.packages("tidyterra")
 library(terra)
 library(geodata)
+library(ggplot2)
+library(tidyterra)
 
 ##  Importing climate data 
 
@@ -45,6 +47,8 @@ names(env_covariates) <- c(
   "tmp_range_yr", "precip_yr", "precip_seasonality"
 )
 env_covariates
+
+terra::global(env_covariates, mean)
 
 ###
 country_codes <- geodata::country_codes(
@@ -79,13 +83,15 @@ lhf_centroids <- country_centroids[country_centroids$NAME_0 %in% c(lhf_names),]
 plot(world_coord, 
      col = 'seashell2'
 )
-points(lhf_centroids, 
-       col = "purple", 
-       pch = 20, 
-       cex = 2)
+points(
+  lhf_centroids, 
+  col = "purple", 
+  pch = 20, 
+  cex = 2
+)
 
 ## Plotting points over climatic variables: 
-bio <- 1
+bio <- 7
 plot(
   env_covariates[[bio]], 
   main = names(env_covariates)[bio]
@@ -168,6 +174,15 @@ lhf_names$country <- gsub(
   x = lhf_names$country
 )
 
+lhf_names$country <- gsub(
+  pattern = "Czech Republic", 
+  replacement = "Czechia", 
+  x = lhf_names$country
+)
+
+lhf_names <- unique(lhf_names$country)
+
+
 ## Combine with the environmental variables
 
 lhf_meta <- dplyr::full_join(
@@ -175,6 +190,37 @@ lhf_meta <- dplyr::full_join(
   y = lhf_env,
   by = dplyr::join_by(country)
 )
+
+# add in regions and continents: 
+lhf_meta <- dplyr::left_join(
+  x = lhf_meta, 
+  y = country_codes, # quereied above
+  by = dplyr::join_by("ISO_3" == "ISO3")
+)
+
+# reorder and remove unwanted cols: 
+lhf_meta <- lhf_meta[,c(1:3,16,21,23,4:14)]
+
+# unite first two columns to reform sample names: 
+lhf_meta <- tidyr::unite(
+  data = lhf_meta, 
+  col = "samples", 
+  acc, country,
+  sep = "_", 
+  na.rm = TRUE, 
+  remove = FALSE
+)
+
+# remove spaces from sample names: 
+lhf_meta$samples <- gsub(
+  pattern = " ", 
+  replacement = "_", 
+  x = lhf_meta$samples
+)
+
+# change iso column names (to remove capital letters)
+names(lhf_meta)[4:6] <- c("iso3", "iso2", "subcontinent")
+
 
 # write to an output file: 
 #  feather is used as it is an ultrafast file format designed to quickly read 
@@ -187,3 +233,91 @@ feather::write_feather(
   x = lhf_meta, 
   path = "~/Documents/data/lhf_d/lhf_meta_data_09_2023.feather"
 )
+
+
+## extracting averages per country region ----------
+
+head(
+  terra::extract(
+  env_covariates[[2]], 
+  world_coord, 
+  na.rm = TRUE, 
+  weights = TRUE
+  )
+)
+
+lhf_env <-   terra::extract(
+  env_covariates, 
+  world_coord, 
+  mean,
+  na.rm = TRUE, 
+  weights = TRUE
+)
+
+## combine the mean values with country names...
+lhf_env <- base::cbind(
+  world_coord_df, 
+  lhf_env
+)
+
+# collect country centriod coordinates
+world_centroid <- terra::geom(country_centroids)
+
+# combine with mean value data 
+lhf_env <- base::cbind(
+  lhf_env, 
+  world_centroid
+)
+
+lhf_env <- lhf_env[,c(1,2,15,16,4:12)]
+names(lhf_env)[1:4] <- c("ISO_3", "country", "lat", "long")
+
+lhf_env$country <- gsub(
+  pattern = "Czech Republic", 
+  replacement = "Czechia", 
+  x = lhf_env$country
+)
+
+# using names from above...
+lhf_meta2 <- dplyr::left_join(
+  x = lhf_names, 
+  y = lhf_env,
+  by = dplyr::join_by(country)
+)
+
+# add in regions and continents: 
+lhf_meta2 <- dplyr::left_join(
+  x = lhf_meta2, 
+  y = country_codes, # quereied above
+  by = dplyr::join_by("ISO_3" == "ISO3")
+)
+
+# reorder and remove unwanted cols: 
+lhf_meta2 <- lhf_meta2[,c(1:3,16,21,23,4:14)]
+
+# unite first two columns to reform sample names: 
+lhf_meta2 <- tidyr::unite(
+  data = lhf_meta2, 
+  col = "samples", 
+  acc, country,
+  sep = "_", 
+  na.rm = TRUE, 
+  remove = FALSE
+)
+
+# remove spaces from sample names: 
+lhf_meta2$samples <- gsub(
+  pattern = " ", 
+  replacement = "_", 
+  x = lhf_meta2$samples
+)
+
+# change iso column names (to remove capital letters)
+names(lhf_meta2)[4:6] <- c("iso3", "iso2", "subcontinent")
+
+# write to alternate file 
+feather::write_feather(
+  x = lhf_meta2, 
+  path = "~/Documents/data/lhf_d/lhf_meta2_data_09_2023.feather"
+)
+
