@@ -446,7 +446,7 @@ plot(world_coord,
 )
 terra::points(
   lhf_centroids, 
-  col = "purple", 
+  col = "darkorchid3", 
   pch = 20, 
   cex = 1
 )
@@ -1359,6 +1359,7 @@ library(dplyr)
 library(MuMIn)
 library(stringr)
 library(ggplot2)
+library(Hmisc)
 
 ```
 
@@ -1430,6 +1431,35 @@ lhf_test_AF <- tidyr::pivot_wider(
 )
 
 head(lhf_test_AF)
+
+```
+
+#### Formatting the full set of SNPs
+
+Although the test set of SNPs will be used for the following exploratory
+analysis, the full panel will be necessary for later downstream analysis.
+
+```{r pivot_AF}
+
+## Note: this requires the pgls_required_data chunk to have been run. 
+
+lhf_AF <- tidyr::pivot_wider(
+  data = allele_freq_location, 
+  names_from = POS, 
+  values_from = a_freq, 
+  names_prefix = "pos_"
+)
+
+lhf_AF.df <- as.data.frame(
+  lhf_AF
+)
+
+cdat <- caper::comparative.data(
+  data = lhf_AF.df, 
+  phy = rooted_tree_filtered,  #imported in above (if not already present)
+  names.col = "location", 
+  na.omit = TRUE
+)
 
 ```
 
@@ -1616,33 +1646,164 @@ options(na.action = "na.omit")
 
 ```
 
-### Generating ANOVA tables 
+### Assessing SNP linkage
 
-Once the model is selected, ANOVA tables can be generated for each SNP. 
+Given many of the SNPs are in close proximity to each other, and there are very
+low levels of recombination in the mitochondrial genome, there is likely a high
+degree of correlation (i.e: linkage) between some sets of allele frequencies. In
+an attempt to identify areas where there are exceptionally high levels of
+correlation the following heat maps can be created. (In effect this are LD
+plots)
 
-```{r pivot_AF}
+```{r AF_heatmaps, fig.height=5, fig.width=10}
 
-## Note: this requires the pgls_required_data chunk to have been run. 
+col_N <- ncol(lhf_AF) # calculate the total number of columns
+n_split <- 3 # select the number of heatmaps you want 
+             # e.g.: an n_split of 2 will plot the first half then the second half.
 
-lhf_AF <- tidyr::pivot_wider(
-  data = allele_freq_location, 
-  names_from = POS, 
-  values_from = a_freq, 
-  names_prefix = "pos_"
+for (i in 1:n_split) {
+  
+  if (i == 1){
+    x <- 15 
+  } else {
+    x <- x.
+  }
+  
+  if (i ==1) {
+    y <-  i*((col_N/n_split))
+    y <- base::round(y)
+  } else {
+    y <- i*(col_N/n_split)
+    y <- base::round(y)
+  }
+  
+  print(x)
+  print(y)
+  
+  AF_cor <- Hmisc::rcorr(
+    as.matrix(
+    lhf_AF[,x:y]
+    )
+  )
+  
+  x. <- y 
+  
+  AF_cor$r[lower.tri(AF_cor$r)] <- NA
+
+  AF_cor <- reshape2::melt(
+    AF_cor$r,
+    na.rm = TRUE
+  )
+  
+p <- ggplot2::ggplot(
+    data = AF_cor,
+    ggplot2::aes(
+      x = Var1,
+      y = Var2,
+      fill = value
+      )
+    ) +
+    geom_tile(
+      colour = "white"
+    ) +
+    scale_fill_gradient2(
+      low = "deepskyblue4",
+      high = "darkorchid3",
+      mid = "snow3",
+      midpoint = 0,
+      #limit = c(0.5,1),
+    ) +
+ #  ggtitle(
+ #     paste("AF_heatmap", i)
+ #   ) +
+   theme(
+     axis.text.x = element_text(
+       angle = 55,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 5
+       ), 
+     axis.text.y = element_text(
+       angle = 5,
+       vjust = 0.5,
+       hjust = 0.5, 
+       size = 4
+       ), 
+     axis.title = element_blank(), 
+     legend.position = "none"
+   )
+  
+  print(p)
+}
+```
+
+To calculate the matrix for a specific set of columns:
+
+```{r AF_cor_specific}
+
+AF_cor <- Hmisc::rcorr(
+    as.matrix(
+    lhf_AF[,4:460]
+    )
 )
 
-lhf_AF.df <- as.data.frame(
-  lhf_AF
-)
+# AF_cor$r[lower.tri(AF_cor$r)] <- NA
 
-cdat <- caper::comparative.data(
-  data = lhf_AF.df, 
-  phy = rooted_tree_filtered,  #imported in above (if not already present)
-  names.col = "location", 
-  na.omit = TRUE
-)
+# AF_cor$r <- AF_cor$r[12:nrow((AF_cor$r)), 1:11]
+AF_cor$r <- AF_cor$r[ 12:200, 1:11]
+
+View(AF_cor$r)
+
+AF_cor <- reshape2::melt(
+  AF_cor$r,
+  na.rm = TRUE
+  )
+
+message("AF_cor created")
+
+ggplot2::ggplot(
+    data = AF_cor,
+    ggplot2::aes(
+      x = Var2,
+      y = Var1,
+      fill = value
+      )
+    ) +
+    geom_tile(
+      colour = "white"
+    ) +
+    scale_fill_gradient2(
+      low = "deepskyblue4",
+      high = "darkorchid3",
+      mid = "snow3",
+      midpoint = 0,
+      #limit = c(0.5,1),
+      #space = "Lab",
+      #name="Pearson\nCorrelation"
+    ) +
+   theme(
+     axis.text.x = element_text(
+       angle = 55,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 5
+       ), 
+     axis.text.y = element_text(
+       angle = 5,
+       vjust = 0.5,
+       hjust = 0.5, 
+       size = 4
+       ), 
+    # axis.title = element_blank(), 
+    # legend.position = "none"
+   )
+    
 
 ```
+
+### Generating ANOVA tables
+
+Once the model is selected, ANOVA tables can be generated for each SNP.
 
 ```{r generating_ANOVA_tables}
 
@@ -1695,7 +1856,7 @@ for (i in 18:ncol(lhf_AF.df)){
 ```
 
 ```{r bonferroni_corrections}
-bon_threshold <- 0.05/(ncol(lhf_AF.df)-8)*5
+bon_threshold <- 0.05/(ncol(lhf_AF.df)-8)*1
 ```
 
 ```{r manhattan_plots, echo=FALSE}
@@ -1713,10 +1874,10 @@ ggplot2::ggplot(
   ggplot2::scale_colour_manual(
   #  values = c("chartreuse4","darkorange3", "deepskyblue2",
   #             "lightgrey", "darkorchid3","orchid1", "black")
-    values = c("deepskyblue2", "grey")
+    values = c("deepskyblue4", "grey")
   ) +
   ggplot2::geom_line(
-    y = -1*log10(bon_threshold), 
+    y = -1*log10(0.05), 
     colour = "black", 
     size = 1
   ) +
@@ -1756,5 +1917,201 @@ ggplot2::ggplot(
     )
   )
 
+
+```
+
+```{r}
+ggplot2::ggplot(
+  data = anova_scores, 
+  mapping = ggplot2::aes(
+    x = as.numeric(snp_pos), 
+    y = log10(`Pr(>F)`), 
+    colour = covariate 
+    )
+  ) + 
+  ggplot2::geom_point(
+  ) +
+  ggplot2::scale_colour_manual(
+  #  values = c("chartreuse4","darkorange3", "deepskyblue2",
+  #             "lightgrey", "darkorchid3","orchid1", "black")
+    values = c( "chartreuse3", "chartreuse4", "darkorchid", "darkorchid4","darkorange3" ,"orchid", "deepskyblue4", "lightgrey")
+  ) +
+  ggplot2::geom_line(
+    y = -1*log10(0.05), 
+    colour = "black", 
+    size = 1
+  ) +
+  ggplot2::geom_segment(
+    data = mt_gene_pos,
+    ggplot2::aes(
+      x = Starting, 
+      xend = Ending, 
+      y = -80, 
+      yend = -80, 
+      col = complex
+    ),
+    size = 6, 
+    alpha = 0.4, 
+    position = position_jitter(
+      height = 3
+    )
+  )+
+  #"darkorchid3", "firebrick3", "chartreuse3", "chartreuse4", "turquoise", "deepskyblue4"
+  ggplot2::xlab(
+    "SNP position"
+  ) + 
+  ggplot2::ylab(
+    "Logged P-value"
+  ) + 
+  ggplot2::scale_x_continuous(
+    breaks = seq(0,17000, 1000)
+  ) +
+  ggplot2::ylim(c(0, -100)
+  ) +
+  ggplot2::ylab(
+    "Logged P-value"
+  ) +
+  ggplot2::theme(
+    legend.position = "bottom", 
+    axis.line = element_line(
+      linewidth = 1, 
+      colour = "black"
+    ), 
+    plot.background = element_rect(
+      fill = "snow3"
+    ), 
+    panel.grid = element_line(
+      colour = "snow3", 
+      linetype = "dotdash"
+    ),
+    panel.grid.major.x = element_line(
+      colour = "snow4", 
+      linetype = "dashed"
+    ), 
+    legend.background = element_rect(
+      fill = "snow3"
+    )
+  )
+```
+
+#### Reading in Gene Positions
+
+Taking csv from MITOMAP
+
+```{r}
+mt_loci_pos <- read.csv(
+  file = "~/Documents/data/lhf_d/GenomeLoci_MITOMAP_Foswiki.csv"
+)
+
+unique(mt_loci_pos$Shorthand)
+
+mt_gene <- c("ATPase6", "ATPase8", "COI", "COII", "COIII", "Cytb", "ND1", 
+             "ND2", "ND3", "ND4", "ND4L", "ND5", "ND6", "16S", "12S")
+
+mt_gene_pos <- mt_loci_pos[mt_loci_pos$Shorthand %in% c(mt_gene),]
+
+unique(mt_gene_pos$Shorthand)
+
+mt_classification <- data.frame(
+  shorthand = unique(mt_gene_pos$Shorthand),
+  complex = c("C.V", "C.V", "C.IV", "C.IV", "C.IV", "C.III", "CI", "CI", "CI", "CI", "CI", "CI", "CI"   , "12S", "16S")
+)
+
+mt_gene_pos <- dplyr::left_join(
+  x = mt_gene_pos,
+  y = mt_classification, 
+  by = join_by(Shorthand == shorthand)
+) 
+
+```
+
+#### SNP loci distributions
+
+This section is looking at which significant SNPs fall in each of the loci types
+(Coding, Non-coding, tRNA).
+
+Creating the combined tibble:
+
+```{r combining_loci_sig}
+
+anova_scores_ <- anova_scores
+
+anova_scores_$snp_pos <- as.numeric(anova_scores_$snp_pos)
+
+mt_loci_pos$Starting <- as.numeric(mt_loci_pos$Starting)
+mt_loci_pos$Ending <- as.numeric(mt_loci_pos$Ending)
+
+sig_loci_pos <- dplyr::left_join(
+  x = anova_scores_, 
+  y = mt_loci_pos, 
+  by = join_by(snp_pos >= Starting, snp_pos <= Ending)
+)
+
+sig_loci_pos$classification <- sig_loci_pos$Shorthand
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "CR.*", 
+  replacement = "CR"
+)
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "12S|16S", 
+  replacement = "rRNA"
+)
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "ND.*", 
+  replacement = "C_I"
+)
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "CO.*", 
+  replacement = "C_IV"
+)
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "Cytb", 
+  replacement = "C_III"
+)
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "ATP.*", 
+  replacement = "C_V"
+)
+
+sig_loci_pos$classification <- stringi::stri_replace_all(
+  str = sig_loci_pos$classification, 
+  regex = "NC.*", 
+  replacement = "NC"
+)
+
+tRNA_pos <- sig_loci_pos %>%
+  dplyr::filter(
+    base::grepl(
+      "tRNA", 
+       Description
+    )
+  ) 
+
+tRNA_pos$classification <- "tRNA"
+
+sig_loci_pos <- sig_loci_pos %>%
+  dplyr::filter(
+    !base::grepl(
+      "tRNA", 
+       Description
+    )
+  ) 
+
+sig_loci_pos <- rbind(sig_loci_pos, tRNA_pos)
+
+
+unique(sig_loci_pos$classification)  
 
 ```
