@@ -10,17 +10,18 @@ toc: TRUE
 editor_options:
   markdown:
     wrap: 80
+  chunk_output_type: inline
 ---
 
 # Introduction
 
 This markdown document is a guide to the formatting and analysis used on the
 "Low Hanging Fruit" (LHF) project. The key aim of this project is to identify
-any mitochondrial SNPs whose frequency correlates with climatic or environmental
-variables on a global scale. This requires (at the broadest level): acquisition
-of the data, alignment of the sequences, filtering of SNP variants, collating
-environmental variables, and analysis of any correlations and the testing of
-models.
+any mitochondrial SNPs whose frequency correlates with (and is accurately model
+by) climatic or environmental variables at the global scale. This requires (at
+the broadest level): acquisition of the data, alignment of the sequences,
+filtering of SNP variants, collating environmental variables, and analysis of
+any correlations and the testing of models.
 
 The specific code used to do this is not in it's entirety contained herein.
 Instead this document may at some points reference other R scripts which have
@@ -45,6 +46,185 @@ The following contains a list of steps in order of use:
 10. Visualising genetic variation (inc PCAs)
 11. Calculating population allele frequencies & Fst values
 12. Creating Trees
+
+## Downloading GenBank files
+
+This section is taken directly from lhf_entrez_download_local.R (available on
+the GitHub), copied in here for completeness.
+
+As this project requires location data (which is not automatically included on
+NCBI entries), the full GenBank files need to be acquired for all the relevant
+genomes. This is achieved here through the use of the 'rentrez' package and API
+which allows for the direct download of files from the NCBI server into R. (A
+Python version is also available.) The default number of requests allowed by
+NCBI is 3 per second - for large requests this can dramatically slow down the
+processing speed. This limit can be increased to 10/s by registering for an NCBI
+account and linking a personal API key.
+
+```{r rentrez_setup, include=FALSE}
+
+# install if needed:
+# install.packages("rentrez")
+library(rentrez)
+
+# link personal API key
+set_entrez_key("f5ff2d14bbc152047694a55253157602b507")
+# set the key for each session
+# use your own personal key
+```
+
+Once the rentrez package and API has been set up, NCBI can be queried directly.
+The following search term was used here (in concordance with the term used by
+the MITOMAP website):
+
+```{r rentrez_search, include=FALSE}
+
+mito_search <- entrez_search(
+  db = "nucleotide",  # select the relevant database
+  term = "(00000015400[SLEN] : 00000016600[SLEN]) AND Homo[Organism] AND mitochondrion
+  [FILT] AND (15400[SLEN] : 17000[SLEN])",
+  use_history = TRUE
+) 
+
+```
+
+This search term defines the length (ensuring only full mtDNA sequences are
+returned), the organism, as well as the organelle. Rather than downloading this
+search result (which will impose an storage-related cutoff), the output is
+stored directly on the NCBI server (\`use_history = TRUE\`).
+
+To download the sequences the resulting search item can be used to fetch the
+associated GenBank documents.
+
+This loops through items in the search term (for the specified range) and
+appends all the GenBank files into a singular text file. This was done in
+multiple chunks for practicality reasons (it's easier and quicker to spot if
+there was an error in smaller groups.
+
+> Note: It is **strongly advised** that you keep the loop and chunk size
+> small... Even if the code is running fine the NCBI server sometimes resets
+> and/or time-outs the query. In this case it's better to know sooner rather
+> than later.
+
+```{r entrez_loop, include=FALSE}
+
+# E.g.: for the final batch from 60001 to 64300: 
+
+for( seq_start in seq(60001,64300,100)){
+  # starting off with a small sample size
+  recs <- entrez_fetch(  ----FAILSAFE: remove the comment at the start to execute 
+    db ="nucleotide",  # the database to query
+    web_history = mito_search$web_history, # the search term defined above
+    #id = mito_search$ids,
+    rettype ="gb",  # the type of file to return (GenBank)
+    retmax = 100,   # the maximum number to return (this should match the loop size)
+    retstart=seq_start)
+  Sys.sleep(0.1)          # to ensure NCBI is not overloaded.
+  cat(recs, file="/Users/finleythomas/Documents/data/lhf_d/mito_gb_60-64_.txt", append=TRUE)
+  cat(seq_start + 99, "GenBank files downloaded\r")  # this helps to check progress. 
+}
+
+```
+
+The end result of this process is a group of .txt files that contain a very
+large number of concatenated GenBank files. The relevant information is
+extracted from these in the following stages.
+
+## Converting to FASTA format
+
+#### Extracting information from GenBank flies
+
+The following python code was created (with significant help from chatGBT) to
+extract information from the downloaded text files and convert into a table
+suitable for further data processing. It is available on the GitHub
+(extract_gb_info_v3.6.py).
+
+> Fail-safes (in the form of commented lines) have been added here to prevent
+> the script from accidentally running and overwriting current files)
+
+```{python, include = FALSE}
+
+import sys
+import re
+
+if len(sys.argv) != 2:
+    print("Usage: python extract_genbank_info.py input_file")
+    sys.exit()
+
+# input_file = sys.argv[1]
+# output_file = "/Users/finleythomas/Documents/data/lhf_d/genbank_output_60-64.tsv"
+
+with open(input_file, "r") as f:
+    with open(output_file, "w") as out:
+        out.write("Accession\tOrganism\tCountry\tNote\tCell_Line\tHaplogroup\tSequence\n")
+        accession = ""
+        organism = ""
+        country = ""
+        note = ""
+        cell_line = ""
+        haplogroup = ""
+        sequence = ""
+        in_features = False
+        in_source = False
+        for line in f:
+            line = line.strip()
+            if line.startswith("ACCESSION"):
+                accession = line.split()[1]
+            elif line.startswith("  ORGANISM") or line.startswith("ORGANISM"):
+                organism = line.split("  ")[-1].strip()
+            elif line.startswith("  /country") or line.startswith("country"):
+                country = line.split("=")[-1].strip().strip('"')
+            elif line.startswith("  /note") or line.startswith("note"):
+                note = line.split("=")[-1].strip().strip('"')
+            elif line.startswith("  /cell_line") or line.startswith("/cell_line"):
+                cell_line = line.split("=")[-1].strip().strip('"')
+            elif line.startswith("SOURCE"):
+                in_source = True
+            elif line.startswith("FEATURES"):
+                in_features = True
+            elif line.startswith("ORIGIN"):
+                sequence_lines = []
+                for next_line in f:
+                    if next_line.startswith("//"):
+                        break
+                    sequence_lines.append(next_line.strip())
+                sequence = ''.join(sequence_lines)
+                sequence = re.sub(r'\d', '', sequence)
+                out.write(accession + "\t" + organism + "\t" + country + "\t" + note + "\t" + #cell_line + "\t" + haplogroup + "\t" + sequence + "\n")
+                accession = ""
+                organism = ""
+                country = ""
+                note = ""
+                cell_line = ""
+                haplogroup = ""
+                sequence = ""
+                in_features = False
+            elif in_features and "/country=" in line:
+                country = line.split("=")[-1].strip().strip('"')
+            elif in_features and "/note=" in line and not note:
+                note = line.split("=")[-1].strip().strip('"')
+            elif in_features and "/cell_line=" in line:
+                cell_line = line.split("=")[-1].strip().strip('"')
+            elif in_source and "/haplogroup=" in line:
+                haplogroup = line.split("=")[-1].strip().strip('"')
+            elif line.startswith("//"):
+                in_source = False
+        if accession:
+            out.write(accession + "\t" + organism + "\t" + country + "\t" + note + "\t" + cell_line + "\t" + haplogroup + "\t" + sequence + "\n")
+
+print("Extraction complete. Results saved to " + output_file + ".")
+
+```
+
+#### Processing extracted GenBank file
+
+As country names need to be isolated from the records, these need to be imported
+into the R workspace.
+
+```{r country_info, include= FALSE}
+
+
+```
 
 ## Converting to VCF format
 
@@ -189,7 +369,7 @@ associated with a specific set of countries.
 Similar to allele frequencies, it is good to be aware of exactly what data you
 may be missing in the data set...
 
-```{r check missingness,  echo=FALSE, warning=FALSE, message=FALSE}
+```{r check_missingness,  echo=FALSE, warning=FALSE, message=FALSE}
 
 # missing data per site:
 var_miss <- readr::read_delim(
@@ -257,7 +437,7 @@ The list of sample names is best queried using **BCFtools**, another command
 line tool capable of quickly dealing with VCF (and bcf) files. (It can also be
 downloaded using homebrew on Mac OS)
 
-```{bash bcftools, include=FALSE, echo=TRUE}
+```{bash bcftools_sample_names, include=FALSE, echo=TRUE}
 
 # navigate to the correct directory:
 cd path/to/vcfs
@@ -440,10 +620,13 @@ world_centroid <- terra::geom(country_centroids)
 These centroid coordinates can be plotted over a blank map:
 
 ```{r centroids_blank_map, echo=FALSE}
+
+# plot the underlying map
 plot(world_coord, 
   col = 'snow3', 
   border = "snow4"
 )
+# overlay the centroid coordinates
 terra::points(
   lhf_centroids, 
   col = "darkorchid3", 
@@ -455,12 +638,13 @@ terra::points(
 Or over a map with an environmental covariate shown: (Annual temperature range
 shown here)
 
-```{r}
-bio <- 7
+```{r map_env_covariates, message=FALSE}
+bio <- 7  # select the desired environmental trait
 plot(
   env_covariates[[bio]], 
   main = names(env_covariates)[bio]
-  )
+  ) # plot the environmental data 
+# add the centroid points
 terra::points(
   lhf_centroids, 
   col = "purple", 
@@ -475,6 +659,7 @@ To collect ISO information on the full list of country codes:
 country_codes <- geodata::country_codes(
   query = NULL
 )
+# For consistency...
 country_codes$NAME <- gsub(
   pattern = "Czech Republic", 
   replacement = "Czechia", 
@@ -491,7 +676,7 @@ from the global dataset, there are multiple different ways to do this. It is
 hard to determine which of these is best to use, and there are a few pros and
 cons for each.
 
-The two methods written out here are:
+The two methods written out here are: (or at least they will be eventually..)
 
 -   extracting data from country centroid positions
 
@@ -500,7 +685,7 @@ The two methods written out here are:
 #### To extract mean values by region (option 2):
 
 ```{r mean_extracted, echo=TRUE}
-
+# extract the mean values for each of the countries
 lhf_env <-   terra::extract(
   env_covariates, 
   world_coord, 
@@ -532,6 +717,7 @@ lhf_env. <- lhf_env.[,c(1,14,15,3:11)]
 # rename wordy column names:
 names(lhf_env.)[1:3] <- c("country", "long", "lat")
 
+# still causing issues...
 lhf_env.$country <- gsub(
   pattern = "Czech Republic", 
   replacement = "Czechia", 
@@ -585,7 +771,7 @@ names(lhf_meta2)[6:9] <- c("sovereign", "iso3","iso2", "subcontinent")
 
 Save this meta file (so that you do not need to rerun this for every script).
 Feather format was chosen here as it allows for extremely rapid download and
-upload into R and python.
+upload into R (and Python).
 
 ```{r meta2_feather, echo=TRUE}
 
@@ -604,6 +790,39 @@ feather::write_feather(
 )
 
 ```
+
+### Filtering countries by N
+
+As many of the following stages use measures of allele frequencies (AF) or
+heterozygousity (Hs) we want to make sure we only include populations where
+there are a sufficient number of individuals to accurately calculate these
+values.
+
+> **The cutoff selected here is 20 individuals.**
+
+This is twice the number used by Harrison/ the TRMP8 paper (as they were looking
+at autosomes and thus had 2 counts per individual).
+
+```{r country_N, echo=FALSE}
+library(dplyr)
+
+# group by country and summarise: 
+country_N <- lhf_meta2 %>%  # generated above
+  group_by(country) %>%
+  summarise(
+    N = n()
+  )
+
+# filter out countries with fewer than 20
+country_N <- country_N %>%
+  filter(N >= 20)  # define the cutoff value. 
+
+# convert remaining countries to a list 
+country_N <- c(country_N$country)
+
+```
+
+## Importing mtDNA loci
 
 ## Visualising Genetic Variation
 
@@ -636,8 +855,8 @@ library(mapplots)
 Two files are required for this section: the filtered VCF and the associated
 meta data file (see above for how to make these).
 
-> The row names in the meta file must *exactly match* the sample names in the
-> VCF.
+> **The row names in the meta file must *exactly match* the sample names in the
+> VCF.**
 
 ```{r upload_paired_files, echo=TRUE}
 
@@ -669,8 +888,6 @@ vcf.gl <- vcfR::vcfR2genlight(
 ) # this will omit any non-biallelic sites
 ```
 
-adegenet::pop(vcf.gl)
-
 ```{r genlight_meta, echo=TRUE}
 
 #  Specify the country IDs
@@ -685,7 +902,7 @@ vcf.gl
 
 In this example *country* information is specified to the 'population'
 variable - this could also be continent or subcontinent information (or any
-other defining variable).
+other defining variable in the metadata file).
 
 We can use this genlight object to run Principal Component Analysis and
 calculate the allele frequencies.
@@ -697,10 +914,10 @@ To generate the pca scores and eigenvalues we can use the *adegenet* package...
 ***Note: This takes a very large (many hours) amount of time to run (given the
 very large number of sequences).***
 
-```{r create_pca, echo=FALSE}
+```{r create_pca, echo=FALSE, inlcude = FALSE}
 
 vcf.pca <- adegenet::glPca(
-  x = vcf.gl, 
+  # x = vcf.gl,  # FAILSAFE-remove initial hashtag
   nf = 4,          # how many PCs to retain
   parallel = TRUE, # unless specified otherwise, the max number of available cores will be used. 
 )
@@ -709,7 +926,7 @@ vcf.pca <- adegenet::glPca(
 
 Once generated, we can convert the PCA scores into a tibble (and save this).
 
-```{r format_pca_scores, echo=FALSE}
+```{r format_pca_scores, echo=FALSE, include=FALSE}
 
 # convert to a tibble
 vcf.pca.scores <- tidyr::as_tibble(vcf.pca$scores)
@@ -720,6 +937,16 @@ feather::write_feather(
   path = "~/Documents/data/lhf_d/lhf_pca_scores_0.005.feather"
 )
 
+```
+
+Once the PCA scores have been generated (and saved) once, they can be read in
+with the following code:
+
+```{r read_pca_scores, echo=FALSE}
+
+vcf.pca.scores <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/lhf_pca_scores_0.005.feather"
+)
 ```
 
 We can add information from the metadata file to the PCA scores:
@@ -745,9 +972,9 @@ specific component:
 
 # to create the overall plot:
 graphics::barplot(
-  100 * vcf.pca$eig / sum(vcf.pca$eig),
+  vcf.pca$eig / sum(vcf.pca$eig) *100,
   space = 0.1,
-  colour = "darkseagreen"
+  fill = "darkseagreen"
 )
 
 # calculate the sum of all eigenvalues
@@ -771,8 +998,8 @@ The vcf scores above can be plotted to show the distribution of samples, these
 an be coloured/shaped by any of the variables in the meta file which have been
 added to the PCA scores tibble (see above: chunk pca_meta2).
 
-Given the very large number of countries in the dataset, colouring by this value
-is not advised (continents gives a much clearer overview).
+Given the very large number of countries in the data, colouring by this value is
+not advised (continents gives a much clearer overview).
 
 ```{r pca_plots, echo=TRUE}
 
@@ -827,12 +1054,366 @@ snp_loadings <- dplyr::arrange(
 head(snp_loadings)
 ```
 
-## Calculating Population Allele Frequencies
+\-\-\-\-\-- NOTE: TODO - SAVE THESE LOADINGS/ PCA ------------
 
-Calculating the allele frequencies by population is valuable for both
-visualising the data and is necessary for calculating population Fst scores.
+## Population Allele Frequencies
 
-```{r pop_allele_freq, echo=TRUE}
+> After getting very muddled in this section I decided it needed a complete
+> re-write: what follows is the product of this.
+
+Allele frequencies are a focal point of this study and will be used to determine
+whether environmental variables likely exert a selective pressure on mtDNA.
+
+### Setup
+
+```{r load_AF_build_data, echo=FALSE}
+
+library(dplyr)
+
+# start with the vcf file: 
+lhf_vcf <- vcfR::read.vcfR(
+  file = "~/Documents/data/lhf_d/vcf/snp_sites_filtered_vcf_maf0.005_noRef_092023.recode.vcf", 
+  # this file is the same as the one used for vcf processing
+  verbose = TRUE
+)
+
+# add in the metadata 
+# note the second meta data file is used here (with country-wide averages)
+lhf_meta2 <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/lhf_meta2_0.005_data_11_2023.feather"
+)
+
+# plus country grouped values: 
+lhf_env. <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/lhf_country_metadata_maf0.005_11_2023.feather"
+  # change this path to path the desired destination
+)
+```
+
+For downstream analysis the data is converted to GENID and GENPOP objects. Both
+are S4 class objects (similar to genlight objects used above) that are suitable
+for working with large scale genetic data that is separated at the individual
+(genid) or population (genpop) level - both are designed to work with *adegenet*
+and *hierfstat* packages.
+
+```{r genid_create, echo =FALSE}
+
+# convert to genid
+lhf_genid <- vcfR::vcfR2genind(
+  lhf_vcf
+)
+
+# add in country data
+adegenet::pop(lhf_genid) <- lhf_meta2$country
+
+# check that population data was added
+head(lhf_genid@pop)
+
+```
+
+The GENID object can be filtered to only include countries that have more that
+the cutoff (20) number of individuals (see 'Filtering countries by N').
+
+```{r genid_filter, echo=FALSE}
+lhf_genid <- lhf_genid[lhf_genid@pop %in% country_N]
+```
+
+This can be converted to a GENPOP object, grouping individuals by country:
+
+```{r create_genpop, echo=FALSE}
+lhf_genpop <- adegenet::genind2genpop(lhf_genid)
+```
+
+### Calculating Population Allele Frequencies
+
+To generate allele frequencies the `makefreq()` function from *adegenet* was
+used.
+
+> Note: The assumptions of this process are a bit unknown - does it factoring in
+> a measure of Hs? Is it fully applicable to mtDNA?
+
+```{r calculate_AF}
+
+# generate frequencies
+lhf_AF <- adegenet::makefreq(
+  x = lhf_genpop, # using the genpop object
+  missing = NA
+)
+# NOTE: this data is separated by allele NOT loci... 
+
+# convert to a tibble: 
+lhf_AF <- tidyr::as_tibble(
+  x = lhf_AF, 
+  rownames = "pop" # tranfer the rownames into a new column
+)
+```
+
+Once generated, the AF data requires considerable formatting:
+
+```{r AF_formatting, echo = FALSE, warning=FALSE}
+
+# convert into a long format (to help deal with loci & alleles)
+lhf_AF <- tidyr::pivot_longer(
+  data = lhf_AF,
+  cols = -1,
+  names_to = "allele", 
+  values_to = "a_freq"
+)
+
+# remove the "1_" prefix on SNP positions
+lhf_AF$allele <- gsub(
+  pattern = "1_", 
+  replacement = "", 
+  x = lhf_AF$allele
+)
+
+# replace special characters (causes issues later on)
+lhf_AF$allele <- gsub(
+  pattern = "\\.", 
+  replacement = "_", 
+  x = lhf_AF$allele
+)
+
+# separate out the alleles 
+lhf_AF <- tidyr::separate_wider_delim(
+  data = lhf_AF, 
+  cols = allele, 
+  delim = "_", 
+  names = c("pos", "allele")
+)
+
+# convert into a wider format (col per allele) 
+lhf_AF <- tidyr::pivot_wider(
+  data = lhf_AF, 
+  names_from = "allele", 
+  values_from = "a_freq"
+)
+
+# rename columns: 
+colnames(lhf_AF) <- c(
+  "pop", "pos", 
+  "a1_freq", "a2_freq", "a3_freq", "a4_freq"
+)
+
+## To combine with environmental data: 
+# join with country summaries
+allele_freq_location <- dplyr::left_join(
+  x = lhf_AF, 
+  y = lhf_env., 
+  by = dplyr::join_by("pop" == "country")
+)
+
+# Add in naming info
+allele_freq_location <- allele_freq_location <- dplyr::left_join(
+  x = allele_freq_location, 
+  y = country_codes[,c(1:3,8,10)], 
+  by = dplyr::join_by("pop" == "NAME")
+)
+```
+
+The resulting table contains rows of data for each position x country
+combination, with columns for the frequency of each of the possible alleles
+(typically 2 but up to 4), as well as all the associated environmental data for
+each country.
+
+```{r head_lhf_AF}
+head(allele_freq_location)
+```
+
+**Save this file:**
+
+```{r AF_download}
+
+feather::write_feather(
+  x = allele_freq_location, 
+  path = "~/Documents/data/lhf_d/lhf_country_allele_freq_maf0.005.feather"
+)
+
+```
+
+### Plotting Allele Frequencies
+
+#### Pie-chart maps
+
+The allele frequencies can be plotted ontop of the global maps:
+
+Pick a allele of interest:
+
+> POS_9607 used here as it contributes most to the PCA variance.
+
+```{r allele_freq_select, echo=FALSE}
+allele_freq_select <- allele_freq_location[allele_freq_location$pos == "15215",]
+# 193
+```
+
+```{r plot_AF}
+
+# using coordinates gathered earlier: 
+plot(
+  world_coord, 
+  col = 'snow3', 
+  border = "snow3"
+)
+
+for (i in 1:nrow(allele_freq_select)) {
+  mapplots::add.pie(
+    z = c(
+      allele_freq_select$a1_freq[i], 
+      allele_freq_select$a2_freq[i], 
+      allele_freq_select$a3_freq[i],
+      allele_freq_select$a4_freq[i]
+    ), 
+    x = allele_freq_select$long[i], 
+    y = allele_freq_select$lat[i], 
+    radius = 3, 
+    col = c(
+      ggplot2::alpha("cadetblue3", 0.8), ggplot2::alpha("orchid2", 0.8),
+      ggplot2::alpha("firebrick", 0.8), ggplot2::alpha("darkorchid3", 0.8)
+    ), 
+    labels = allele_freq_select$pos[i], 
+    label.dist = 1.1, 
+    cex = 0.5
+  )
+}
+
+```
+
+Instead of plotting globally on a map the values can also be shown on a
+traditional axis.
+
+\-\-\-- **How to add error bars to this?**
+
+```{r allele_freq_points, include=TRUE, echo=FALSE}
+ggplot2::ggplot(
+  data = allele_freq_select, 
+  mapping = ggplot2::aes(
+    x =  reorder(x = pop, +a1_freq), # plot the bars in value order
+    y = a1_freq, # value to plot
+    colour = continent
+  )
+) + 
+  ggplot2::geom_point(
+    #stat = "identity"
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c(
+      "deepskyblue4", "firebrick4", "darkorchid3", "chartreuse4", "turquoise",
+  "chartreuse3"
+    )
+  ) +
+  ggplot2::theme(
+     axis.text.x = ggplot2::element_text(
+       angle = 90,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 5
+       )
+) +
+ggplot2::ylim(c(
+    min(allele_freq_select$a2_freq)-0.05, 1 # set the axis to be more precise
+  )
+) + 
+ggplot2::xlab("Country"
+) + 
+ggplot2::ylab("Allele Frequency")
+```
+
+#### Allele frequency distributions 
+
+One concern that I have with this data is that at each SNP there is an excess of
+the (presumably) ancestral allele; this leads to extremely skewed allele
+frequency distributions. Given the implications for parametric analysis (and the
+potential effect on downstream model residuals) I think this is something worth
+looking into (or at the very least considering).
+
+```{r AF_wide_formatting, echo=FALSE}
+
+# convert to wide format
+lhf_AF_wide <- tidyr::pivot_wider(
+  data = allele_freq_location[,-c(4,5,6)],  # change these col depending on the allele selected
+  names_from = pos, 
+  values_from = a1_freq, 
+  names_prefix = "pos_"
+)
+
+# remove problem countries (from tree - see below)
+problem_countries <- c("Canada", "Belarus", "Finland", "Netherlands")
+
+##
+## ----------------- ^^ move this filter higher up... 
+
+lhf_AF_wide <- lhf_AF_wide %>%
+  filter(! pop %in% problem_countries)
+
+# remove columns with na only 
+#lhf_AF_wide <- lhf_AF_wide %>%
+#  select_if(~ !any(is.na(.)))
+
+lhf_AF.df <- 0
+lhf_AF.df <- as.data.frame(
+  lhf_AF_wide
+)
+
+```
+
+Looking at the distributions:
+
+```{r AF_distributions, echo=TRUE}
+
+hist(
+  lhf_AF_wide$pos_4388, 
+  col = "deepskyblue4", 
+  breaks = 25
+)
+
+shapiro.test(lhf_AF_wide$pos_4388)
+```
+
+I have not run this extensively but for the SNPs checked there is always an
+extreme skew/ inflation of 1 values. The following transformations were applied
+(but with no success):
+
+```{r AF_distribution_transformations, echo=FALSE}
+# looking at 4388
+hist(
+  log10(lhf_AF_wide$pos_4388), 
+  col = "deepskyblue4", 
+  breaks = 25
+)
+
+hist(
+  log(lhf_AF_wide$pos_4388), 
+  col = "firebrick4", 
+  breaks = 25
+)
+
+hist(
+  sqrt(lhf_AF_wide$pos_4388), 
+  col = "darkorchid4", 
+  breaks = 25
+)
+
+hist(
+  1/sqrt(lhf_AF_wide$pos_4388), 
+  col = "orchid3", 
+  breaks = 25
+)
+
+
+#shapiro.test(lhf_AF_wide$pos_4388)
+
+```
+
+## Calculating Heterozygosity
+
+Calculating the heterozygosity by population is valuable for looking at the
+genetic diversity across the mtDNA. (Plus this is what previous studies have
+looked at.)
+
+For the **Setup** - see the section in the 'Calculating Allele Frequencies'
+section.
+
+```{r pop_Hs, echo=TRUE}
 
 pop <- as.factor(c(lhf_meta2$country))
 
@@ -847,24 +1428,24 @@ This data will require reformatting:
 
 ```{r pop_AF_formatting, echo=FALSE}
 
-allele_freq <- pop_diffs[,c(1:149)] # change ncol to fit the data (i.e: no. countries)
+allele_Hs<- pop_diffs[,c(1:149)] # change ncol to fit the data (i.e: no. countries)
 
-allele_freq <- reshape2::melt(
-  allele_freq
+allele_Hs <- reshape2::melt(
+  allele_Hs
 )
 
-names(allele_freq)[3:4] <- c("location", "a_freq") 
+names(allele_Hs)[3:4] <- c("location", "a_Hs") 
 
 # remove erronous prefixes:
-allele_freq$location<- gsub(
+allele_Hs$location<- gsub(
   pattern = "Hs_", 
   replacement = "", 
-  x = allele_freq$location
+  x = allele_Hs$location
 )
-allele_freq$location <- gsub(
+allele_Hs$location <- gsub(
   pattern = "n_", 
   replacement = "", 
-  x = allele_freq$location
+  x = allele_Hs$location
 )
 
 ```
@@ -897,45 +1478,25 @@ names(location_coords)[c(1,2)] <- c("location", "iso3")
 Once coordinates are available, these can be joined to the allele frequency
 data:
 
-```{r AF_join_coord, echo=FALSE}
+```{r Hs_join_coord, echo=FALSE}
 
 # if using continents: 
-allele_freq_location <- dplyr::left_join(
-  x = allele_freq, 
+allele_Hs_location <- dplyr::left_join(
+  x = allele_Hs, 
   y = location_coords, 
   by = join_by("location" == "location")
 )
 
-# calculate which countries have very low N and remove:
-country_N <- lhf_meta2 %>%
-  group_by(country) %>%
-  summarise(
-    N = n()
-  )
-
-country_N <- country_N %>%
-  filter(N >= 20) 
-country_N <- c(country_N$country)
-
-allele_freq_location <- allele_freq_location[allele_freq_location$location %in% c(country_N),]
-
-head(allele_freq_location)
-```
-
-```{r AF_join_coord_country}
-# NOTE: This will not run unless country_codes have been queried above, this needs to be added in...
-#
-# if using countries: 
-
-allele_freq_location <- dplyr::left_join(
-  x = allele_freq_location, 
-  y = country_codes,   
-  by = join_by("location" == "NAME")
+allele_Hs_location <- allele_Hs_location <- dplyr::left_join(
+  x = allele_Hs_location, 
+  y = country_codes[,c(1:3,8,10)], 
+  by = dplyr::join_by("location" == "NAME")
 )
 
-allele_freq_location <- allele_freq_location[,c(1:8, 13, 15)]
-head(allele_freq_location)
+allele_Hs_location <- allele_Hs_location[allele_Hs_location$location %in% c(country_N),]
+# see section above on how to generate this list...
 
+head(allele_Hs_location)
 ```
 
 Save this file:
@@ -943,13 +1504,13 @@ Save this file:
 ```{r AF_download}
 
 feather::write_feather(
-  x = allele_freq_location, 
-  path = "~/Documents/data/lhf_d/lhf_country_allele_freq_maf0.005.feather"
+  x = allele_Hs_location, 
+  path = "~/Documents/data/lhf_d/lhf_country_allele_Hs_maf0.005.feather"
 )
 
 ```
 
-### Plotting Allele Frequencies
+### Plotting Heterozygosity 
 
 Frequencies of specific alleles can also be plotted on a world map.
 
@@ -959,7 +1520,7 @@ above)
 ```{r select_allele, echo=TRUE}
 
 # isolate the allele of interest: 
-allele_freq_select <- allele_freq_location[allele_freq_location$POS == "9607",]
+allele_Hs_select <- allele_Hs_location[allele_Hs_location$POS == "9607",]
 
 ```
 
@@ -972,19 +1533,19 @@ plot(
   border = "snow3"
 )
 
-for (i in 1:nrow(allele_freq_select)) {
+for (i in 1:nrow(allele_Hs_select)) {
   mapplots::add.pie(
     z = c(
-      allele_freq_select$a_freq[i], 
-      1- allele_freq_select$a_freq[i]
+      allele_Hs_select$a_Hs[i], 
+      1- allele_Hs_select$a_Hs[i]
     ), 
-    x = allele_freq_select$long[i], 
-    y = allele_freq_select$lat[i], 
+    x = allele_Hs_select$long[i], 
+    y = allele_Hs_select$lat[i], 
     radius = 3, 
     col = c(
       ggplot2::alpha("cadetblue3", 0.8), ggplot2::alpha("orchid2", 0.8)
     ), 
-    labels = allele_freq_select$iso3[i], 
+    labels = allele_Hs_select$iso3[i], 
     #label.dist = 1.1, 
     cex = 0.5
   )
@@ -992,9 +1553,47 @@ for (i in 1:nrow(allele_freq_select)) {
 
 ```
 
+**To plot the values on the axis...**
+
+```{r Hs_point_plots, fig.cap="Heterozygosity Plot"}
+
+ggplot2::ggplot(
+  data = allele_Hs_select, 
+  mapping = ggplot2::aes(
+    x =  reorder(x = location, +a_Hs), # plot the bars in value order
+    y = a_Hs, # value to plot
+    fill = continent
+  )
+) + 
+  ggplot2::geom_bar(
+    stat = "identity"
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "deepskyblue4", "firebrick4", "darkorchid3", "chartreuse4", "turquoise",
+  "chartreuse3"
+    )
+  ) +
+  ggplot2::theme(
+     axis.text.x = ggplot2::element_text(
+       angle = 90,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 5
+       )
+) +
+ggplot2::ylim(c(
+    min(allele_Hs_select$a_Hs)-0.05, 0.55 # set the axis to be more precise
+  )
+) + 
+ggplot2::xlab("Country"
+) + 
+ggplot2::ylab("Heterozygousity")
+```
+
 To plot by continent:
 
-```{r a_freq_continent, include=FALSE}
+```{r Hs_freq_continent, include=FALSE}
 
 pop <- as.factor(c(lhf_meta2$subcontinent))
 
@@ -1004,24 +1603,24 @@ continent_diffs <- vcfR::genetic_diff(
   # uses Nei's distance as standard
 )
 
-continent_allele_freq <- continent_diffs[,c(1:ncol(continent_diffs))] # change ncol to fit the data (i.e: no. countries)
+continent_allele_Hs <- continent_diffs[,c(1:24)] # change ncol to fit the data (i.e: no. countries)
 
-continent_allele_freq <- reshape2::melt(
-  continent_allele_freq
+continent_allele_Hs <- reshape2::melt(
+  continent_allele_Hs
 )
 
-names(continent_allele_freq)[3:4] <- c("location", "a_freq") 
+names(continent_allele_Hs)[3:4] <- c("location", "a_Hs") 
 
 # remove erronous prefixes:
-continent_allele_freq$location<- gsub(
+continent_allele_Hs$location<- gsub(
   pattern = "Hs_", 
   replacement = "", 
-  x = continent_allele_freq$location
+  x = continent_allele_Hs$location
 )
-continent_allele_freq$location <- gsub(
+continent_allele_Hs$location <- gsub(
   pattern = "n_", 
   replacement = "", 
-  x = continent_allele_freq$location
+  x = continent_allele_Hs$location
 )
 
 # select continent/country/subcontinent as required
@@ -1042,17 +1641,17 @@ continent_coords <- unique(continent_coords)
 names(continent_coords)[1] <- "location"
 
 # if using continents: 
-allele_freq_continent <- dplyr::left_join(
-  x = continent_allele_freq, 
+allele_Hs_continent <- dplyr::left_join(
+  x = continent_allele_Hs, 
   y = continent_coords, 
   by = join_by("location" == "location")
 )
 ```
 
-```{r plot_AF_continent, echo=FALSE}
+```{r plot_Hs_continent, echo=FALSE}
 #allele_freq_continent <- allele_freq_continent[,c(1:8, 13, 15)]
 
-allele_freq_select <- allele_freq_continent[allele_freq_continent$POS == "9607",]
+allele_Hs_select <- allele_Hs_continent[allele_Hs_continent$POS == "9607",]
 
 # using coordinates gathered earlier: 
 plot(
@@ -1061,19 +1660,19 @@ plot(
   border = "snow3"
 )
 
-for (i in 1:nrow(allele_freq_select)) {
+for (i in 1:nrow(allele_Hs_select)) {
   mapplots::add.pie(
     z = c(
-      allele_freq_select$a_freq[i], 
-      1- allele_freq_select$a_freq[i]
+      allele_Hs_select$a_Hs[i], 
+      1- allele_Hs_select$a_Hs[i]
       ), 
-    x = allele_freq_select$long[i], 
-    y = allele_freq_select$lat[i], 
+    x = allele_Hs_select$long[i], 
+    y = allele_Hs_select$lat[i], 
     radius = 7, 
     col = c(
       ggplot2::alpha("cadetblue3", 0.8), ggplot2::alpha("orchid2", 0.8)
     ), 
-    labels = allele_freq_select$location[i], 
+    labels = allele_Hs_select$location[i], 
     label.dist = 1.1, 
     cex = 0.5
   )
@@ -1086,7 +1685,7 @@ For downstream analyses it is necessary to have measures of genetic diversity
 between populations. This is first used to construct a tree, which is
 subsequently used in the PGLS analysis.
 
-```{r}
+```{r fst_packages, echo=FALSE}
 # load in required libraries
 if (!require("hierfstat")) install.packages("hierfstat")
 
@@ -1097,7 +1696,7 @@ library(tidyr)
 
 #### Reading in the data
 
-If the above script has been run previously (and you wish to continue onwards
+If the above script has been run previously (and you wish to continue onward
 from here), the feather files generated earlier can be used to read the data
 back into R.
 
@@ -1116,10 +1715,12 @@ lhf_vcf <- vcfR::read.vcfR(
 
 This data can be formatted to only include information on the position, country
 and allele frequencies. It is then converted to a "genid" object (another type
-of S4 class object)
+of S4 class object) --- this was also generated earlier when calculating allele
+frequencies.
 
 ```{r create_genid_pop, echo=FALSE}
 
+# convert the VCF to genid
 lhf_genid <- vcfR::vcfR2genind(
   lhf_vcf
 )
@@ -1127,14 +1728,19 @@ lhf_genid <- vcfR::vcfR2genind(
 # add in country data
 adegenet::pop(lhf_genid) <- lhf_meta2$country
 
+# remove countries with small Ns ...
+lhf_genid <- lhf_genid[lhf_genid@pop %in% country_N]
+
 head(lhf_genid$pop)
 
 ```
 
-```{r calculate_fst, echo=FALSE}
+```{r calculate_fst, echo=FALSE, include=FALSE}
 
+# Convert from GENID object to a hierfstat object
 lhf_fstat <- hierfstat::genind2hierfstat(lhf_genid)
 
+#  Calculate Nei's genetic distances between populations...
 lhf_fst <- hierfstat::pairwise.neifst(
   dat = lhf_fstat, 
   diploid = FALSE
@@ -1151,37 +1757,37 @@ file:
 # save the data (as this takes a while to run)
 feather::write_feather(
   x = as.data.frame(lhf_fst), 
-  path = "~/Documents/data/lhf_d/lhf_pairwise_fst_maf0.005_112023.feather"
+  path = "~/Documents/data/lhf_d/lhf_pairwise_fst_filtered_maf0.005_112023.feather"
+)
+```
+
+If already run, the data can be imported with:
+
+```{r load_pairwise_fst}
+lhf_fst_filtered <- feather::read_feather(
+   path = "~/Documents/data/lhf_d/lhf_pairwise_fst_filtered_maf0.005_112023.feather"
 )
 ```
 
 ### Creating trees
 
-The computed Fst scores can be used directly to create a phylogentic tree, or
+The computed Fst scores can be used directly to create a phylogenetic tree, or
 the can be used to calculate the genetic distance between populations (which is
 then used for tree building purposes).
 
-```{r}
-country_N <- lhf_meta2 %>%
-  group_by(country) %>%
-  summarise(
-    N = n()
-  )
-
-country_N <- country_N %>%
-  filter(N >= 20) 
-country_N <- c(country_N$country)
-
-lhf_fst_filtered <- lhf_fst[(rownames(lhf_fst) %in% country_N),
-                            (colnames(lhf_fst) %in% country_N) ]
-```
+As no out-group is available, we midpoint root this tree. A key assumption of
+this is that all branches are evolving at the same rate (- is this true here??)
 
 ```{r building_trees, echo=FALSE}
+
 # generate a tree from the fst values
-lhf_tree <- ape::njs(lhf_fst_filtered)
+lhf_tree <- ape::njs(lhf_fst)  # this requires the data to be in a matrix format
+
+# midpoint root the tree
+rooted_tree <- phangorn::midpoint(lhf_tree)
 
 # create a new tibble for the tree metadata 
-tree_meta <- dplyr::as_tibble(lhf_tree$tip.label)
+tree_meta <- dplyr::as_tibble(rooted_tree$tip.label)
 names(tree_meta) <- "country"
 
 # combine populations (countries) with the associated metadata
@@ -1196,7 +1802,7 @@ tree_meta <- tree_meta[,c(1,2,8,10)]
 names(tree_meta)[c(2,3)] <- c("iso3", "subcontinent")
 ```
 
-For aesthetic purposes, colors can be assigned to different continents
+For aesthetic purposes, colors can be assigned to different continents:
 
 ```{r set_tree_colours, echo=FALSE}
 
@@ -1226,22 +1832,7 @@ tree_colours <- tree_meta$cont_colour
 
 ```
 
-As no outgroup is available, we midpoint root this tree. A key assumption of
-this is that all branches are evolving at the same rate (- is this true here??)
-
-```{r midpoint_root}
-
-ape::plot.phylo(
-  x = lhf_tree, 
-  type = "fan",
-  use.edge.length = FALSE, 
-  cex = 0.7, 
-  #srt = 20, 
-  label.offset = 0.05, 
-  tip.color = tree_colours
-)
-
-rooted_tree <- phangorn::midpoint(lhf_tree)
+```{r midpoint_root, include=TRUE, fig.height=7, fig.width=7}
 
 ape::plot.phylo(
   x = rooted_tree, 
@@ -1257,7 +1848,7 @@ ape::plot.phylo(
 
 Saving the tree:
 
-```{r}
+```{r saving_tree}
 ape::write.tree(
   rooted_tree, 
   file = "~/Documents/data/lhf_d/lhf_pairwise_tree_rooted_midpoint.newick"
@@ -1269,7 +1860,7 @@ ape::write.tree(
 To ensure that the tree is as accurate as possible, countries with a small
 number of individuals will be removed from the analysis:
 
-```{r fig.height=6, fig.width=6}
+```{r filtered-tree, fig.height=7, fig.width=7}
 # looking at problem countries on the tree... 
 # removing Canada, Finland, Netherlands, and Belarus (for now)
 problem_countries <- c("Canada", "Belarus", "Finland", "Netherlands")
@@ -1337,7 +1928,7 @@ ape::write.tree(
 )
 ```
 
-We can test the quality of this tree by perfoming a bootstrapping analysis ---
+We can test the quality of this tree by performing a bootstrapping analysis ---
 how does this work for a distance matrix created from population Fst values?
 Surely it is the same every time?
 
@@ -1374,16 +1965,16 @@ allele_freq_location <- feather::read_feather(
   path = "~/Documents/data/lhf_d/lhf_country_allele_freq_maf0.005.feather"
 )
 
-lhf_env. <- feather::read_feather(
-   path = "~/Documents/data/lhf_d/lhf_country_metadata_maf0.005_11_2023.feather"
-)
+#lhf_env. <- feather::read_feather(
+#   path = "~/Documents/data/lhf_d/lhf_country_metadata_maf0.005_11_2023.feather"
+#)
 
 # combine the environmental data with the population allele frequencies
-allele_freq_location <- dplyr::left_join(
-  x = allele_freq_location, 
-  y = lhf_env.[,-c(2,3)], 
-  by = join_by("location"=="country")
-)
+#allele_freq_location <- dplyr::left_join(
+#  x = allele_freq_location, 
+#  y = lhf_env.[,-c(2,3)], 
+#  by = join_by("location"=="country")
+#)
 
 # read in the tree 
 rooted_tree_filtered <- ape::read.tree(
@@ -1394,7 +1985,7 @@ rooted_tree_filtered <- ape::read.tree(
 
 #### Selecting a test set of SNPs:
 
-```{r select_test_snps}
+```{r select_test_snps, include=FALSE}
 # list all unique snps
 #unique(allele_freq_location$POS)
 
@@ -1413,7 +2004,7 @@ print(
 
 ```
 
-```{r pivot_test_AF}
+```{r pivot_test_AF, echo=FALSE, include=FALSE}
 
 # filter to only include test snps
 lhf_test_AF <- allele_freq_location %>%
@@ -1457,7 +2048,7 @@ lhf_AF.df <- as.data.frame(
 cdat <- caper::comparative.data(
   data = lhf_AF.df, 
   phy = rooted_tree_filtered,  #imported in above (if not already present)
-  names.col = "location", 
+  names.col = "pop", 
   na.omit = TRUE
 )
 
@@ -1465,12 +2056,12 @@ cdat <- caper::comparative.data(
 
 #### Comparing environmental variables
 
-```{r plot_env_corr}
+```{r plot_env_corr, echo=TRUE}
 
 # plot correlations: 
 #  between environmental variables:
 psych::pairs.panels(
-  x = lhf_test_AF[,c(4:14)], 
+  x = lhf_AF_wide[,c(2:12)], 
   lm = TRUE, 
   stars = TRUE, 
   hist.col = "orchid3"
@@ -1478,16 +2069,16 @@ psych::pairs.panels(
 
 ```
 
-```{r}
+```{r plot_env_corr_2}
 # between some snps (and environmental variables)
 psych::pairs.panels(
-  x = lhf_test_AF[,c(15:29)], 
+  x = lhf_AF_wide[,c(15:29)], 
   lm = TRUE, 
   stars = TRUE, 
   hist.col = "orchid3"
 )
 psych::pairs.panels(
-  x = lhf_test_AF[,c(sample(4:14, 2), sample(15:29, 10))], 
+  x = lhf_AF_wide[,c(sample(2:12, 2), sample(12:ncol(lhf_AF_wide), 10))], 
   lm = TRUE, 
   stars = TRUE, 
   hist.col = "orchid3"
@@ -1569,7 +2160,7 @@ The third method described here can scripted by:
 # starting with pos_7909 ~lat 
 # 
 pgls_mod <- caper::pgls(
-  formula = pos_7909 ~ lat , 
+  formula = pos_9544 ~ lat , 
   data = cdat, 
   #lambda = "ML"
 )
@@ -1577,7 +2168,7 @@ print("AIC")
 AIC(pgls_mod)
 
 pgls_mod <- caper::pgls(
-  formula = pos_7909 ~ lat + tmp_min, 
+  formula = pos_9544 ~ lat + tmp_min, 
   data = cdat, 
   #lambda = "ML"
 )
@@ -1586,7 +2177,7 @@ print("AIC")
 AIC(pgls_mod)
 
 pgls_mod <- caper::pgls(
-  formula = pos_7909 ~ lat + tmp_min + precip_yr, 
+  formula = pos_9544 ~ lat + tmp_min + precip_yr, 
   data = cdat, 
   #lambda = "ML"
 )
@@ -1594,7 +2185,7 @@ print("AIC")
 AIC(pgls_mod)
 
 pgls_mod <- caper::pgls(
-  formula = pos_7909 ~ lat + tmp_min + precip_yr + precip_seasonality , 
+  formula = pos_9544 ~ lat + tmp_min + precip_yr + precip_seasonality , 
   data = cdat, 
   #lambda = "ML"
 )
@@ -1602,7 +2193,7 @@ print("AIC")
 AIC(pgls_mod)
 
 pgls_mod <- caper::pgls(
-  formula = pos_7909 ~ lat + tmp_min + precip_yr + precip_seasonality + tmp_max, 
+  formula = pos_7609 ~ lat + tmp_min + precip_yr + precip_seasonality + tmp_max, 
   data = cdat, 
   #lambda = "ML"
 )
@@ -1610,7 +2201,7 @@ print("AIC")
 AIC(pgls_mod)
 
 pgls_mod <- caper::pgls(
-  formula = pos_7909 ~ lat + tmp_min + precip_yr + precip_seasonality + tmp_max , 
+  formula = pos_7609 ~ lat + tmp_min + precip_yr + precip_seasonality + tmp_max , 
   data = cdat, 
   #lambda = "ML"
 )
@@ -1658,9 +2249,9 @@ plots)
 ```{r AF_heatmaps, fig.height=5, fig.width=10}
 
 col_N <- ncol(lhf_AF) # calculate the total number of columns
-n_split <- 3 # select the number of heatmaps you want 
+n_split <- 1 # select the number of heatmaps you want 
              # e.g.: an n_split of 2 will plot the first half then the second half.
-
+library(ggplot2)
 for (i in 1:n_split) {
   
   if (i == 1){
@@ -1703,7 +2294,7 @@ p <- ggplot2::ggplot(
       fill = value
       )
     ) +
-    geom_tile(
+    ggplot2::geom_tile(
       colour = "white"
     ) +
     scale_fill_gradient2(
@@ -1743,7 +2334,7 @@ To calculate the matrix for a specific set of columns:
 
 AF_cor <- Hmisc::rcorr(
     as.matrix(
-    lhf_AF[,4:460]
+    lhf_AF[,2:458]
     )
 )
 
@@ -1805,9 +2396,9 @@ ggplot2::ggplot(
 
 Once the model is selected, ANOVA tables can be generated for each SNP.
 
-```{r generating_ANOVA_tables}
+```{r generating_ANOVA_tables, warning=FALSE}
 
-for (i in 18:ncol(lhf_AF.df)){
+for (i in 13:ncol(lhf_AF.df)){
   
   # select position
   snp <- names(lhf_AF.df)[i]
@@ -1820,7 +2411,7 @@ for (i in 18:ncol(lhf_AF.df)){
   # create formula
   formula <- as.formula(
     paste(
-      snp, " ~ lat "
+      snp, " ~ tmp_min "
     )
   )
   
@@ -1839,7 +2430,7 @@ for (i in 18:ncol(lhf_AF.df)){
   anova_df <- anova_df %>%
     mutate(covariate = rownames(anova_df))
   
-  if (i == 18){
+  if (i == 13){
     anova_scores <- anova_df
   } else {
     anova_scores <- rbind(
@@ -1849,14 +2440,19 @@ for (i in 18:ncol(lhf_AF.df)){
   }
   
   if (i == ncol(lhf_AF.df)){
+    anova_scores$snp_pos <- as.numeric(anova_scores$snp_pos)
+    
     return(anova_scores)
   }
   
 }
+
+anova_scores$labels <- anova_scores$snp_pos
+anova_scores$labels[anova_scores$`Pr(>F)` >= 1e-40 ] <- ""
 ```
 
 ```{r bonferroni_corrections}
-bon_threshold <- 0.05/(ncol(lhf_AF.df)-8)*1
+bon_threshold <- 0.05/(ncol(lhf_AF.df)-12)*1
 ```
 
 ```{r manhattan_plots, echo=FALSE}
@@ -1864,7 +2460,7 @@ bon_threshold <- 0.05/(ncol(lhf_AF.df)-8)*1
 ggplot2::ggplot(
   data = anova_scores, 
   mapping = ggplot2::aes(
-    x = as.numeric(snp_pos), 
+    x = snp_pos, 
     y = log10(`Pr(>F)`), 
     colour = covariate 
     )
@@ -1924,38 +2520,48 @@ ggplot2::ggplot(
 ggplot2::ggplot(
   data = anova_scores, 
   mapping = ggplot2::aes(
-    x = as.numeric(snp_pos), 
+    x = snp_pos, 
     y = log10(`Pr(>F)`), 
-    colour = covariate 
-    )
+    colour = covariate
+  )
   ) + 
   ggplot2::geom_point(
   ) +
+  ggplot2::geom_text(
+    mapping = ggplot2::aes(
+      label = labels
+    ), 
+    size = 4,
+    nudge_x = sample(1:10, 1), 
+    nudge_y = 2, 
+    na.rm = TRUE, 
+    show.legend = FALSE
+  ) + 
   ggplot2::scale_colour_manual(
   #  values = c("chartreuse4","darkorange3", "deepskyblue2",
   #             "lightgrey", "darkorchid3","orchid1", "black")
-    values = c( "chartreuse3", "chartreuse4", "darkorchid", "darkorchid4","darkorange3" ,"orchid", "deepskyblue4", "lightgrey")
+    values = c( "darkorange4","orchid", "darkorchid", "darkorchid4", "darkorange2", "firebrick3","deepskyblue4", "snow3", "snow4","lightgrey", "chartreuse3", "chartreuse4", "deepskyblue4", "lightgrey", "deepskyblue3")
   ) +
   ggplot2::geom_line(
-    y = -1*log10(0.05), 
+    y = -1*log10(bon_threshold), 
     colour = "black", 
     size = 1
   ) +
   ggplot2::geom_segment(
-    data = mt_gene_pos,
+    data = mt_loci_pos,
     ggplot2::aes(
       x = Starting, 
       xend = Ending, 
       y = -80, 
       yend = -80, 
-      col = complex
+      col = classification
     ),
-    size = 6, 
+    size = 4, 
     alpha = 0.4, 
     position = position_jitter(
       height = 3
     )
-  )+
+  ) +
   #"darkorchid3", "firebrick3", "chartreuse3", "chartreuse4", "turquoise", "deepskyblue4"
   ggplot2::xlab(
     "SNP position"
@@ -2011,17 +2617,71 @@ mt_gene <- c("ATPase6", "ATPase8", "COI", "COII", "COIII", "Cytb", "ND1",
 mt_gene_pos <- mt_loci_pos[mt_loci_pos$Shorthand %in% c(mt_gene),]
 
 unique(mt_gene_pos$Shorthand)
+```
 
-mt_classification <- data.frame(
-  shorthand = unique(mt_gene_pos$Shorthand),
-  complex = c("C.V", "C.V", "C.IV", "C.IV", "C.IV", "C.III", "CI", "CI", "CI", "CI", "CI", "CI", "CI"   , "12S", "16S")
+```{r }
+mt_loci_pos$classification <- mt_loci_pos$Shorthand
+
+mt_loci_pos$Starting <- as.numeric(mt_loci_pos$Starting)
+mt_loci_pos$Ending <- as.numeric(mt_loci_pos$Ending)
+
+mt_loci_pos <- mt_loci_pos %>%
+  filter( Starting >= 550 ) %>%
+  filter( Starting <= 16025) %>%
+  filter( Shorthand != "CR:HVS1/HV1")
+
+unique(mt_loci_pos$classification)
+
+mt_loci_names <- tidyr::tibble(
+  regex_used = c(
+    "CR.*", "12S|16S", "ND.*","Cytb" ,"CO.*", "ATP.*", "NC.*", "PH2|Humanin|MOTS-C|-|OL"
+  ), 
+  replace_with = c(
+    "C_R", "rRNA", "C_I", "C_III", "C_IV", "C_V", "NC", "other"
+  )
 )
 
-mt_gene_pos <- dplyr::left_join(
-  x = mt_gene_pos,
-  y = mt_classification, 
-  by = join_by(Shorthand == shorthand)
-) 
+for (i in 1:nrow(mt_loci_names)) {
+  mt_loci_pos$classification <- stringi::stri_replace_all(
+    str = mt_loci_pos$classification, 
+    regex = mt_loci_names$regex_used[i], 
+    replacement = mt_loci_names$replace_with[i]
+  )
+}
+
+mt_loci_pos$classification[
+  grepl(
+    pattern = "tRNA.*",
+    mt_loci_pos$Description
+  )
+] <- "tRNA"
+
+# duplicate the CR and ATT rows (to control for the fact that they loop around)
+mt_loci_origin <- mt_loci_pos[grepl(
+        pattern = "C_R|ATT", 
+        mt_loci_pos$classification
+      ),]
+mt_loci_origin$Starting <- 1
+
+# replace ending with end of 'loop'
+mt_loci_pos$Ending[mt_loci_pos$Ending <= 600] <- 16506
+
+mt_loci_pos <- dplyr::bind_rows(
+  mt_loci_pos, 
+  mt_loci_origin
+)
+
+mt_loci_pos$length <- (mt_loci_pos$Ending-mt_loci_pos$Starting) + 1
+
+```
+
+```{r classification_summary}
+
+classification_length <- mt_loci_pos %>%
+  group_by(classification) %>%
+  reframe(
+    total_length = sum(length)
+  )
 
 ```
 
@@ -2032,86 +2692,62 @@ This section is looking at which significant SNPs fall in each of the loci types
 
 Creating the combined tibble:
 
-```{r combining_loci_sig}
-
-anova_scores_ <- anova_scores
-
-anova_scores_$snp_pos <- as.numeric(anova_scores_$snp_pos)
-
-mt_loci_pos$Starting <- as.numeric(mt_loci_pos$Starting)
-mt_loci_pos$Ending <- as.numeric(mt_loci_pos$Ending)
+```{r sig_loci_pos}
 
 sig_loci_pos <- dplyr::left_join(
-  x = anova_scores_, 
+  x = anova_scores, 
   y = mt_loci_pos, 
   by = join_by(snp_pos >= Starting, snp_pos <= Ending)
 )
 
-sig_loci_pos$classification <- sig_loci_pos$Shorthand
+# NOTE: ATT and CR overlap... hence some positions are counted twice
 
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "CR.*", 
-  replacement = "CR"
+
+
+```
+
+```{r loci_statistics}
+
+loci_stat <- sig_loci_pos %>%
+  filter(covariate == "lat") %>%
+  group_by(classification) %>%
+  summarise(
+    N = n()
+  )
+
+loci_stat <- dplyr::left_join(
+  x = loci_stat, 
+  y = classification_length, 
+  by = join_by(classification)
 )
 
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "12S|16S", 
-  replacement = "rRNA"
+loci_stat <- loci_stat %>%
+  dplyr::mutate(per_snp = (N/total_length)*100)
+  
+loci_stat$classification <- as.factor(loci_stat$classification)
+
+loci_stat$classification <- factor(
+  x = loci_stat$classification, 
+  levels = c(
+    "ATT", "C_I", "C_III", "C_IV", "C_V", "C_R", "NC", "other", "rRNA", "tRNA" 
+  )      
 )
+levels(loci_stat$classification)
 
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "ND.*", 
-  replacement = "C_I"
-)
-
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "CO.*", 
-  replacement = "C_IV"
-)
-
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "Cytb", 
-  replacement = "C_III"
-)
-
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "ATP.*", 
-  replacement = "C_V"
-)
-
-sig_loci_pos$classification <- stringi::stri_replace_all(
-  str = sig_loci_pos$classification, 
-  regex = "NC.*", 
-  replacement = "NC"
-)
-
-tRNA_pos <- sig_loci_pos %>%
-  dplyr::filter(
-    base::grepl(
-      "tRNA", 
-       Description
-    )
-  ) 
-
-tRNA_pos$classification <- "tRNA"
-
-sig_loci_pos <- sig_loci_pos %>%
-  dplyr::filter(
-    !base::grepl(
-      "tRNA", 
-       Description
-    )
-  ) 
-
-sig_loci_pos <- rbind(sig_loci_pos, tRNA_pos)
-
-
-unique(sig_loci_pos$classification)  
-
+ggplot2::ggplot(
+  data = loci_stat, 
+   mapping = aes(
+    x = classification, 
+    y = per_snp, 
+    fill = classification
+  )
+  ) +
+  ggplot2::geom_bar(
+    stat = "identity"
+  ) +
+  scale_fill_manual(
+   values =  c( "lightgrey","orchid", "darkorchid", "darkorchid4", "deepskyblue4", "firebrick3", "snow3", "snow4", "chartreuse3", "chartreuse4")
+  ) +
+  theme_minimal()
+  
 ```
