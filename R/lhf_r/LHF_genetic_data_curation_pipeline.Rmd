@@ -1,0 +1,327 @@
+---
+title: "LHF_data_curation_pipeline"
+author: "FiG-T"
+data: "`r Sys.Date()`"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+toc: TRUE
+editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Tree Branch 
+
+This branch of analysis is focused on generating the patristic distances (via a
+phylogenetic tree).
+
+> *alignment file* -[FastTree]-\> *tree file* -[ape]-\> *Patristic Distances
+> table*
+
+## Running FastTree
+
+FastTree 2 (<http://www.microbesonline.org/fasttree/>) was used to infer an
+"approximately maximum likelihood" phylogenetic tree for all individuals in the
+filtered alignment file (total of 23,791 individuals).
+
+This package was selected as it is designed to work with a very large number of
+sequences and performs better than comparable ML programs (e.g. PhyML) when
+default settings are used.
+
+> *FastTree uses the Jukes-Cantor or [generalized
+> time-reversible](http://en.wikipedia.org/wiki/Substitution_model#GTR:_Generalised_time_reversible)
+> (GTR) models of nucleotide evolution and the JTT ([Jones-Taylor-Thornton
+> 1992](http://www.ncbi.nlm.nih.gov/pubmed/1633570)), WAG ([Whelan & Goldman
+> 2001](http://www.ncbi.nlm.nih.gov/pubmed/11319253)), or LG ([Le and Gascuel
+> 2008](http://mbe.oxfordjournals.org/content/25/7/1307.short)) models of amino
+> acid evolution. To account for the varying rates of evolution across sites,
+> FastTree uses a single rate for each site (the
+> ["CAT"](http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=1639535)
+> approximation). To quickly estimate the reliability of each split in the tree,
+> FastTree computes [local support
+> values](http://www.microbesonline.org/fasttree/#Support) with the
+> [Shimodaira-Hasegawa
+> test](http://mbe.oxfordjournals.org/cgi/reprint/16/8/1114) (these are the same
+> as PhyML 3's ["SH-like local
+> supports"](http://www.ncbi.nlm.nih.gov/pubmed/19378142)).*
+>
+> \- <http://www.microbesonline.org/fasttree/> [accessed 08.02.2024]
+
+To run FastTree (after installation):
+
+```{bash FastTree, include = FALSE}
+
+~/Documents/FastTree -nt -gtr -log ~/Documents/data/lhf_d/trees/mafft_aln_filtered_FastTree_02_2024.txt  ~/Documents/data/lhf_d/fasta/aln_mafft_incRef_filtered_3_09_2023.fasta > ~/Documents/data/lhf_d/trees/mafft_aln_filtered_FastTree_02_2024.tree
+
+```
+
+The resulting tree includes all individuals present in the filtered alignment
+(23,791). This is as all individuals may be informative for providing the tree,
+however not all countries have enough individuals to be representative (hence
+some individuals will be filtered out downstream).
+
+## Midpoint rooting 
+
+As no specific outgroup is provided in the alignment there is no obvious
+candidate to root the resulting tree. To get around this issue, midpoint rooting
+was used (whereby the root is placed halfway between the two longest tips).
+
+```{r load_FastTree_output}
+
+# load tree
+FastTree_full <- ape::read.tree(
+  file = "~/Documents/data/lhf_d/trees/mafft_aln_filtered_FastTree_02_2024.tree"
+  # tree generated above 
+)
+
+```
+
+```{r midpoint_rooting}
+
+FastTree_full_rooted <- phangorn::midpoint(
+  FastTree_full
+)
+
+# save this tree
+ape::write.tree(
+  phy = FastTree_full_rooted, 
+  file = "~/Documents/data/lhf_d/trees/mafft_aln_filtered_FastTree_02_2024_rooted.tree"
+)
+```
+
+## Calculating Patristic distances
+
+The aim of computing a tree is so that in downstream analysis we have a way to
+account for shared genetic ancestry between individuals. To input this
+information into the Generalised Linear Models it has to be in the format of a
+single value per individual. The challenge is therefore how to best convert all
+the information contained within the generated tree into a meaningful metric of
+genetic structure.
+
+Fst was earlier used to calculate the differentiation between populations,
+however this method is not applicable to individuals. The decision was therefore
+made to use **Patristic Distances** instead.
+
+Patristic distances (PD) are the sum of the branch lengths for all branches that
+connect two terminal nodes in the phylogenetic tree. There are a number of
+issues in using this (i.e. two individuals could be equally distant away from
+the reference but on completely different branches of the tree), however it
+should successfully capture the genetic differentiation between individuals and
+account for the broad structure of the tree.
+
+```{r load_rooted_tree}
+
+# import midpoint rooted tree (see above)
+FastTree_full_rooted <- ape::read.tree(
+  file = "~/Documents/data/lhf_d/trees/mafft_aln_filtered_FastTree_02_2024_rooted.tree"
+)
+
+```
+
+### Choosing a "base individual". 
+
+To get a single value for the patristic distances it is necessary to select a
+single individual to act as the point of reference. It is not exactly clear to
+me what the best way of selecting this individual is... I have prioritised:
+
+-   Sub-Saharan African individuals (to match with human origins)
+
+-   individuals that are on their own branch
+
+-   Individuals "at the ends" of clades (not exactly technical language but not
+    sure how else to phrase)
+
+The target individual in this analysis was therefore chosen to be:
+
+> **KC345983_Botswana**
+
+```{r target_indv}
+
+target_indv <- "KC345983_Botswana"
+
+# Find the node corresponding to the target individual
+target_node <- which(
+  FastTree_full_rooted$tip.label == target_indv
+)
+```
+
+```{r patristic_distances}
+# Calculate patristic distances from the target individual to all other tips
+patr_dist <- ape::cophenetic.phylo(
+  FastTree_full_rooted
+)[target_node, ]
+
+patr_dist_df <- tidyr::tibble(
+  samples = names(patr_dist),
+  patr_KC345983 = patr_dist
+)
+
+head(patr_dist_df) # check format 
+```
+
+This results in a two column tibble with sample names and the patristic distance
+to KC345983.
+
+```{r save_patristic_dist, include = FALSE}
+
+feather::write_feather(
+  x = patr_dist_df,  # see above
+  path = "~/Documents/data/lhf_d/feather/KC345983_patristic_distances_FastTree_02_2024.feather"
+)
+
+```
+
+# Genotype Data Branch 
+
+This section outlines how to go from the alignment to the genotype matrix used
+in the GLM analysis.
+
+## Overview
+
+alignment file -\> vcf file -\> filtered vcf -\> genotype matrix -\> genotype
+table
+
+## Converting to VCF 
+
+Converting from a FASTA alignment to a VCF was surprisingly difficult - the end
+result was to use the `snp-sites` bioconductor package and run this on Anaconda
+Cloud.
+
+```{python snp_sites, include = FALSE, echo = TRUE}
+
+# list available conda environments
+conda env list
+  # "*" denotes the active environment
+
+# Activate the new environment (or existing one)
+`conda activate <environment_name>`
+
+# Install snp-sites 
+`conda install -c bioconda snp-sites`
+
+# Upload fasta file to cloud terminal, then: 
+
+# Run snp-sites (changing names as required)
+`snp-sites -v -o snp_sites_msa_converted_09_2023.vcf aln_mafft_incRef_filtered_3_09_2023.fasta`
+```
+
+## Filtering the VCF 
+
+The resulting VCF will include any site that is variable, regardless of the
+frequency of the minor allele. Many of these are likely to be caused by mapping
+or sequencing errors and therefore need to be excluded from the analysis. This
+is most easily achieved by using **VCFtools**.
+
+```{bash install_vcfTools, include = FALSE}
+# to install VCF tools on MAC
+brew install vcftools
+```
+
+The filtering steps applied are:
+
+1.  Remove the reference genome (to avoid duplication)
+2.  Set the minor allele frequency threshold to 0.005
+
+> Note: This is a lower MAF than the standard 0.05 however this is focused on
+> removing spurious mapping artefacts. A MAF of 0.005 equates to a minimum count
+> of 119. This is unlikely to be reached by chance alone (I hope).
+
+```{bash vcftools_filtering, include = FALSE, echo = TRUE}
+
+# set the working directory to the folder with vcf files
+cd <path/to/vcfs
+
+# remove the reference individual: 
+vcftools --vcf snp_sites_msa_filtered_converted_09_2023.vcf --remove-indv NC_012920.1 --recode --out snp_sites_filtered_vcf_noRef_092023
+
+# create a new VCF with a MAF of 0.005 
+vcftools --vcf snp_sites_filtered_vcf_noRef_092023.recode.vcf --maf 0.005 --recode --out snp_sites_filtered_vcf_maf0.005_noRef_092023
+
+# (This was repeated for 0.05 and 0.001 cutoffs)
+```
+
+> **This results in a VCF file with 442 sites (of an original 7254) and 23,790
+> individuals. This is the file that will be used going forwards.**
+
+## Collecting sample names 
+
+During the course of the alignment and VCF filtering certain individuals will
+have been removed from the analysis. For later steps, it's important that the
+remaining names exactly match the metadata files. To get the required list of
+sample names the easiest approach is to use **BCFtools**
+(<https://samtools.github.io/bcftools/>, available on Homebrew).
+
+```{bash bcftools_sample_names, include = FALSE, echo = TRUE}
+
+# navigate to the correct directory:
+cd path/to/vcfs
+
+# run bcftools query
+bcftools query -l snp_sites_filtered_vcf_maf0.005_noRef_092023.recode.vcf > lhf_filtered_maf0.005_sampleNames.txt
+
+```
+
+## Extracting Genotype Matrices 
+
+The Generalised Linear Models require a the genetic information to be stored as
+a list of genotypes (1 or 0 for each SNP). This can be extracted from the
+filtered VCF file.
+
+### Import the Filtered VCF file
+
+```{r import_vcf}
+
+lhf_vcf <- vcfR::read.vcfR(
+  file = "~/Documents/data/lhf_d/vcf/snp_sites_filtered_vcf_maf0.005_noRef_092023.recode.vcf", 
+  # this file is the same as the one used for vcf processing
+  verbose = TRUE
+)
+
+```
+
+### Extracting the genotype matrix
+
+```{r extract_gt_matrix}
+
+# extract the Genotype matrix
+lhf_gt <- vcfR::extract.gt(
+  x = lhf_vcf, 
+  element = "GT"
+)
+
+lhf_gt_t <- t(lhf_gt) # transpose so that alleles are the columns not rows
+
+# convert to a tibble 
+lhf_gt_t <- tidyr::as_tibble(
+  lhf_gt_t,
+  rownames = "id" # retain the rownames (ids) and place into a column. 
+)
+```
+
+The resulting tibble has the genotype data for all individuals that passed the
+filtering steps (23,790).
+
+```{r save_GT_table}
+
+feather::write_feather(
+  x = lhf_gt_t, 
+  "~/Documents/data/lhf_d/feather/lhf_gt_table_02_2024.feather"
+)
+
+```
+
+# Metadata Branch 
+
+This branch is focused on compiling together the metadata used for the initial
+analysis (i.e. just WorldClim variables).
+
+> **For now see LHF_Full_Pipeline.Rmd**
+
+The output of this is the "lhf_meta2_maf0.005_data_11_2023.feather" file.

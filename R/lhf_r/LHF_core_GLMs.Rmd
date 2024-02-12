@@ -1,0 +1,1072 @@
+---
+title: "LHF_core_GLMs"
+author: "FiG-T"
+data: "`r Sys.Date()`"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+toc: TRUE
+editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline 
+---
+
+# Introduction
+
+This markdown focuses on how to run the Generalised Linear Models (GLMs) that
+make up the bulk of the core analysis.
+
+## Libraries
+
+```{r libraries}
+library(feather)
+library(dplyr)
+library(lme4)
+library(ggplot2)
+library(stringr)
+```
+
+# Required data 
+
+1.  Genotype matrix (see LHF_genetic_data_curation_pipeline.Rmd)
+2.  Patristic distances for all individuals (see
+    LHF_genetic_data_curation_pipeline.Rmd)
+3.  Environmental metadata for all of the samples (in countries that meet the
+    requirements)
+4.   A list of all the mtDNA loci and their classifications
+
+```{r load_required_data}
+
+# genotype matrix
+lhf_gt_t <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_table_02_2024.feather"
+)
+
+# patristic distances
+patr_dist_df <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/KC345983_patristic_distances_FastTree_02_2024.feather"
+)
+
+# environemental metadata 
+lhf_meta2 <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_meta2_maf0.005_data_11_2023.feather"
+)
+
+# mtDNA loci positioning 
+mt_loci_pos <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/mtDNA_loci_positions_classifications.feather"
+)
+```
+
+Filter countries to only keep individuals that come from a country with more
+that 20 sequences.
+
+```{r country_filter}
+# group by country and summarise: 
+country_N <- lhf_meta2 %>%  # generated above
+  group_by(country) %>%
+  summarise(
+    N = n()
+  )
+
+# filter out countries with fewer than 20
+country_N <- country_N %>%
+  filter(N >= 20)  # define the cutoff value. 
+
+# convert remaining countries to a list 
+country_N <- c(country_N$country)
+
+lhf_meta2 <- lhf_meta2 %>%
+  filter(country %in% country_N)
+```
+
+# Merging datasets 
+
+The GLM models require all the data to be contained within a single table, it is
+therefore necessary to join all the datasets together.
+
+```{r merge_datasets}
+
+# combine environmental data and patristic distances
+lhf_gt_meta_pd <- dplyr::left_join(
+  lhf_meta2, 
+  patr_dist_df, 
+  by = "samples"
+)
+
+# add in genotype data 
+lhf_gt_meta_pd <- dplyr::left_join(
+  lhf_gt_meta_pd, 
+  lhf_gt_t, 
+  by = join_by("samples" == "id")
+)
+
+# format column names 
+names(lhf_gt_meta_pd) <- gsub(
+  pattern = "1_", 
+  replacement = "pos_", 
+  x = names(lhf_gt_meta_pd)
+)
+
+# Convert genotype data to numeric 
+for (x in 21:ncol(lhf_gt_meta_pd)){
+
+col <- names(lhf_gt_meta_pd)[x]
+
+lhf_gt_meta_pd[[col]] <- as.numeric(lhf_gt_meta_pd[[col]])
+}
+```
+
+This combined contains data on:
+
+1.  Unique sample codes for each mtDNA sequence.
+2.  Associated geographical data
+3.  Associated BioClimatic covariates (arranged by countries).
+4.  The patristic distance between each individual and individual KC345983 (from
+    Botswana)
+
+As the range and units or the different environmental covariates are variable,
+these all need to be scaled before being used in the GLM analysis.
+
+```{r scale_covariates}
+
+# Scale the values 
+col_to_scale <- c(4,5,11:19)
+for (x in col_to_scale){
+  
+  col <- names(lhf_gt_meta_pd)[x]
+  
+  lhf_gt_meta_pd[[col]] <- scale(lhf_gt_meta_pd[[col]])
+}
+
+```
+
+```{r save_gt_meta_pd}
+
+# Save this file 
+feather::write_feather(
+  x = lhf_gt_meta_pd, 
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pd_KC345983.feather"
+)
+
+```
+
+# Running GLMs 
+
+This requires the combined dataset from above.
+
+```{r load_glm_data}
+
+# load in data 
+lhf_gt_meta_pd <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pd_KC345983.feather"
+)
+```
+
+## Loading required functions 
+
+The following functions are required to run the GLM models.
+
+The overall workflow is:
+
+1.   Construct a null and full model for each SNP.
+2.  Calculate the dispersion ratio for each full model.
+3.  Filter out full models that are over or under-dispersed.
+4.  Run a comparison between the null and full model.
+5.  Select sites whereby the full model is a significantly better fit than the
+    null.
+6.   Run a 'drop' test to see whether dropping an environmental covariate has a
+    significant impact on how the model performs.
+7.  Repeat 1-6 after dropping specific countries (to test stability)
+
+This is achieved by three functions:
+
+1.  core_GLM_chi_scorer. This performs numbers 1,2,4 & 6.
+2.  core_GLM_formatter. This performs numbers 3 & 5
+3.  drop_GLM_scorer.  - performs number 7.
+
+```{r core_GLM_chi_scorer}
+
+core_GLM_chi_scorer <- function(
+        input,  # the full combined dataset
+        start_col = 21,  # the column where the genotype data starts
+        col_to_use = "NULL",
+        test_formula = "~ patr_KC345983 + lat + precip_yr + (1|iso2)", 
+        null_formula = "~ patr_KC345983 + (1|iso2)", 
+        format_table = FALSE
+        
+  ){
+  
+  library(dplyr)
+  
+  # define columns to use
+  if (col_to_use == "NULL") { 
+    col_pos <- c(
+      start_col:ncol(input)
+    ) 
+  } else {
+    col_pos <- col_to_use
+  }
+  
+  # start loop
+  for (i in col_pos){
+    
+    glm_gt_data_bi <- input %>% # remove third alleles (i.e. only have biallelic sites)
+      filter_at(
+        vars(i), 
+        all_vars(. == 1 | . == 0)
+      )
+    
+    # select position
+    snp <- names(  # test data without 2s... 
+      glm_gt_data_bi
+    )[i]
+    
+    snp_pos <- stringr::str_extract(
+      string = snp, 
+      pattern = "\\d+" # extract digits 
+    )
+    
+    # create formula
+    formula <- as.formula(
+      paste(
+        snp, test_formula # combine the snp position with the covariates
+      )
+    )
+    
+    # run model
+    mod <- lme4::glmer( 
+      data = glm_gt_data_bi,
+      formula = formula ,
+      family = "binomial", 
+      control = lme4::glmerControl(
+        optimizer = "bobyqa", 
+        optCtrl = list(maxfun = 10000)
+      )
+    )
+    
+    # create anova table:
+    chisq_df <- as.data.frame(
+      drop1( # this performs the drop-test (sequentially removes variables from the full model)
+        mod, 
+        test="Chisq", 
+        na.rm = TRUE
+      )
+    )
+    
+    # create Null formula
+    formula_null <- as.formula(
+      paste(
+        snp, null_formula
+      )
+    )
+    
+    # create null model with patristic distance
+    null_mod <- lme4::glmer( 
+      data = glm_gt_data_bi,
+      formula = formula_null ,
+      family = "binomial", 
+      control = lme4::glmerControl(
+        optimizer = "bobyqa", 
+        optCtrl = list(maxfun = 10000)
+      )
+    )
+    
+    # compare null and full model 
+    null_df <- as.data.frame(
+      anova(
+        null_mod, 
+        mod, 
+        test = "Chisq"
+      )
+    )
+    
+    # calculate overdispersion ratios
+    glm_overdisp <- overdisp_fun(mod)
+    
+    # combine with snp value
+    chisq_df <- cbind(
+      chisq_df, 
+      snp_pos, 
+      glm_overdisp[2], 
+      null_df$`Pr(>Chisq)`[2]
+    )   
+    
+    # include the covariates
+    chisq_df <- chisq_df %>%
+      mutate(covariate = rownames(chisq_df))
+    
+    if (i == col_pos[1]){
+      # for the first SNP make a new table of scores
+      chisq_scores_patr <- chisq_df
+    } else {
+      # for subsequent SNPs append to this table
+      chisq_scores_patr <- rbind(
+        chisq_scores_patr, 
+        chisq_df
+      )
+    }
+    if (i == tail(col_pos, 1)
+        ){
+      
+      # for the last SNP append then return the table
+      chisq_scores_patr$snp_pos <- as.numeric(chisq_scores_patr$snp_pos)
+      
+      return(chisq_scores_patr)
+    }
+    
+    message(
+      paste(
+        snp , " - Chi Squared scores calculated"
+      )
+    )
+    
+  }
+  
+  message("All Chi Squared Scores returned")
+  
+}
+```
+
+```{r core_GLM_formatter}
+
+core_GLM_formatter <- function(
+        input, 
+        cutoff_quantile = 0.05, # the level to label
+        overdisp_limits = c(0.75, 1.25) # the default upper and lower dispertion limits
+) {
+  
+  table <- input
+  
+  # rename annoying columns
+  names(table)[c(6,7)] <- c("overdisp", "null_chisq")
+  
+  # filter out sites that do not pass the dispersion filters 
+  table <- table %>%
+    filter(
+      overdisp >= overdisp_limits[1] & overdisp <= overdisp_limits[2]
+    )
+  
+  # calculate the number of remaining SNPs 
+  n_snps <- length(unique(table$snp_pos))
+  
+  message(
+    paste0(
+      n_snps, " remaining after dispersion filtering. /n", 
+      overdisp_limits, " used as the upper and lower limits for dispersion ratios"
+    )
+  )
+  
+  # calculate the bon_ferroni threshold for SNPs that pass chi with the null 
+  bon_threshold_null <- 0.05/(n_snps*1) # 1 test conducted
+  
+  # add labels for each SNP - does the Full model perform significantly better than the Null?
+  table$null_label[table$null_chisq <= bon_threshold] <- "T"
+  table$null_label[table$null_chisq >= bon_threshold] <- "F"
+  
+  # add a label column 
+  table$labels <- table$snp_pos
+  
+  # determine the top 5% cutoff (or as defined in the input)
+  cutoff <- as.numeric(
+    quantile(
+      table$`Pr(Chi)`, 
+      cutoff_quantile, 
+      na.rm = TRUE
+    )
+  )
+  # only include the labels for those above this threshold 
+  table$labels[table$`Pr(Chi)` >= cutoff ] <- ""
+
+  
+  # filter results to neaten plot
+  table <- table %>%
+    filter(covariate != "patr_KC345983") 
+  
+  return(table)
+}
+
+```
+
+```{r drop_GLM_scorer}
+
+drop_GLM_scorer <- function(
+        input, 
+        drop_countries
+) {
+  
+  drop_hits <- list() # initiate empty list
+  
+  for (i in seq_along(drop_countries)) { # for each country/countries to drop
+    
+    message(
+      paste0(
+        "Dropping:   ", drop_countries[i]
+      )
+    )
+    
+    table <- input %>%
+      filter(!str_detect( # detect if the country or countries are present 
+        iso3,
+        drop_countries[i]
+      ) )  # only select countries that dont fit this criteria
+    
+    message(
+      paste0(
+        length(unique(table$iso3)), 
+        " Countries left after filter"
+      )
+    )
+    
+    # run the GLM scorer on each data 
+    drop_glm_scores <- core_GLM_chi_scorer(
+      input = table, 
+      start_col = 21, 
+      test_formula = "~ patr_KC345983 + lat + precip_yr + (1|iso2)", 
+      null_formula = "~ patr_KC345983 + (1|iso2)"
+    )
+    
+    print(
+      head(drop_glm_scores)
+    )
+    
+    drop_glm_scores_filter <- core_GLM_formatter(
+      input = drop_glm_scores, 
+      cutoff_quantile = 0.05,   # which values to include labels for 
+      overdisp_limits = c(0.75, 1.25)
+    )
+    
+    iso3 <- drop_countries[i]
+    
+    drop_hits[[iso3]] <- drop_glm_scores_filter
+    
+    message(
+      paste0(
+        iso3, " successfully dropped"
+      )
+    )
+  }
+  
+  return(drop_hits)
+  
+}
+```
+
+## Comparing with the Null 
+
+Whereby the Null model only includes the genetic patristic distances and a
+random variable.
+
+```{r core_GLM_scores}
+
+core_GLM_scores <- core_GLM_chi_scorer(
+  input = lhf_gt_meta_pd, 
+  start_col = 21, 
+  test_formula = "~ patr_KC345983 + lat + precip_yr + (1|iso2)", 
+  null_formula = "~ patr_KC345983 + (1|iso2)"
+)
+
+
+```
+
+```{r match_SNPs_classification}
+
+SNPs_list <- unique(core_GLM_scores$snp_pos)
+
+SNPs_list <- tibble(
+  pos = SNPs_list
+)
+
+SNPs_list <- left_join(
+  SNPs_list, 
+  mt_loci_pos, 
+  by = join_by(pos >= aln_start, pos <= aln_end)
+)
+
+SNP_classification_N <- SNPs_list %>%
+  group_by(Map.Locus) %>%
+  reframe(
+    N = n()
+  )
+
+feather::write_feather(
+  x = SNP_classification_N, 
+  path = "~/Documents/data/lhf_d/feather/SNP_classification_N.feather"
+)
+```
+
+## Format & filtering outputs 
+
+```{r format_core_GLM_scores}
+
+core_GLM_scores_formatted <- core_GLM_formatter(
+  input = core_GLM_scores,  # full table with GLM scores
+  cutoff_quantile = 0.05,   # which values to include labels for 
+  overdisp_limits = c(0.75, 1.25) # the upper and lower bounds for overdispertion ratios
+)
+```
+
+```{r manhattan_data_lat_precip}
+
+# only inclde SNPs where the full model performs significantly better than the null
+core_GLM_hits <- core_GLM_scores_formatted %>%
+  filter(null_label == "T")
+
+# calculate the remaining number of SNPs 
+n_snp_hits <- length(unique(core_GLM_hits$snp_pos))
+n_snp_hits
+
+bon_threshold_hits <- 0.05/(n_snp_hits*2) # is this 2 or 3?
+ # check here whether they get better or worse 
+
+```
+
+## Dropping countries 
+
+As there are sizable differences in the sample sizes between countries it's
+possible that the signals being observed are being driven by a limited number of
+very well represented countries. To check that this isn't the case the GLMs will
+be re-run after removing each of the 4 countries with more than 1000
+individuals. The aim here is to show that the results are stable regardless of
+whether the countries with larger sample sizes are included.
+
+> There is an argument here for down-sampling however this will greatly reduce
+> the sample size and massively reduce the power to detect differences between
+> the models.
+
+```{r dropping_countries_GLMs}
+countries_to_drop <- c(
+  "RUS|GBR|ESP|USA", 
+  "RUS", 
+  "GBR", 
+  "USA"
+)
+
+drop_hits <- drop_GLM_scorer(
+  input = lhf_gt_meta_pd, 
+  drop_countries = countries_to_drop
+)
+drop_hits_ESP <- drop_GLM_scorer(
+  input = lhf_gt_meta_pd, 
+  drop_countries = "ESP"
+)
+```
+
+```{r combine_drop_hits}
+# save early 
+
+# add in ESP data 
+drop_hits_full <- c(drop_hits, drop_hits_ESP)
+
+# add in table without any dropped countries 
+drop_hits_full[["all"]] <- core_GLM_scores_formatted
+
+drop_hits <- drop_hits_full
+```
+
+```{r extract_sig_hits}
+
+# add in full dataset
+#drop_hits[["all"]] <- core_GLM_scores_formatted
+
+# initiate an empty list
+glm_snps_list <- list() 
+
+# for all the tables in the list 
+for (i in seq_along(drop_hits)) {
+  
+  table <- drop_hits[[i]]
+  
+  bon_threshold_table <- 0.05/(length(unique(table$snp_pos)))
+  
+  print(bon_threshold_table)
+  
+  table <- table %>%
+   dplyr::filter(`Pr(Chi)` < bon_threshold_table)
+  
+  x_lat <- paste0(
+    names(drop_hits)[i], 
+    "_lat"
+  )
+  x_lat_pval <- paste0(
+    names(drop_hits)[i], 
+    "_lat_pval"
+  )
+  
+  x_precip_yr <- paste0(
+    names(drop_hits)[i], 
+    "_precip_yr"
+  )
+  x_precip_yr_pval <- paste0(
+    names(drop_hits)[i], 
+    "_precip_yr_pval"
+  )
+  
+  vect_lat <-  c(table$snp_pos[table$covariate == 'lat'])
+  vect_lat_pval <-  c(table$`Pr(Chi)`[table$covariate == 'lat'])
+  vect_precip <-  c(table$snp_pos[table$covariate == 'precip_yr'])
+  vect_precip_pval <-  c(table$`Pr(Chi)`[table$covariate == 'precip_yr'])
+  
+  glm_snps_list[[x_lat]] <- vect_lat
+  glm_snps_list[[x_lat_pval]] <- vect_lat_pval
+  glm_snps_list[[x_precip_yr]] <- vect_precip
+  glm_snps_list[[x_precip_yr_pval]] <- vect_precip_pval
+  
+}
+
+```
+
+```{r merging_lists, warnings = FALSE}
+
+# find max length (i.e. max number of significant SNPs)
+max_len <- max(
+  sapply(
+    glm_snps_list, 
+    length
+  ) 
+)
+
+# loop through all vectors in the list 
+ for(i in seq_along(glm_snps_list)){
+  
+  length(glm_snps_list[[i]]) <- max_len # assign them all the same length
+  
+  glm_snps_list[[i]] <- gsub(
+    pattern = "pos_",  # replace preffixes
+    replacement = "", 
+    x = glm_snps_list[[i]] 
+  )
+  
+  #names(list_snps)[i] <- list_snps_names[i] # assign names
+}
+
+# bind columns together
+glm_snps <- dplyr::bind_cols(glm_snps_list)
+
+ncol(glm_snps)
+
+# create tibble column of all detected SNPs
+overlap_snps <- purrr::list_c(
+    x = glm_snps_list[c(1,3,5,7,9,11,13,15,17,19,21,23)]
+    #x = list_snps,
+  ) %>%
+  unique() %>%          # keep unique values
+  na.omit() %>%         # remove NAs
+  as.numeric() %>%      #convert from chr to numeric
+  base::sort(
+    decreasing = FALSE  # sort order
+  )
+# convert to tibble
+overlap_snps <- tidyr::tibble(
+  pos = overlap_snps
+)
+
+
+# add in grid (presence/absence) for each test 
+for (i in c(1,3,5,7,9,11,13,15,17,19,21,23)) {
+  
+  glm_snps[[names(glm_snps)[i]]] <- as.numeric(glm_snps[[names(glm_snps)[i]]])
+  
+  overlap_snps[[names(glm_snps)[i]]][
+    overlap_snps$pos %in% c( # if the SNP is in the list of SNPs for a test
+      glm_snps[[
+        names(glm_snps)[i]
+      ]]
+    )
+  ] <- 1     # ... then set the values in that grid to 1
+
+}
+
+# add in sig pvals
+for (i in c(1,3,5,7,9,11,13,15,17,19,21,23)){
+  
+  #x <- 2
+  
+  glm_snps[[i]] <- as.numeric(glm_snps[[i]])
+  
+  table <- glm_snps[, c(i, i+1)]
+  
+  overlap_snps <- dplyr::full_join(
+    x = overlap_snps,
+    y = table, 
+    by =c(
+      "pos" = names(glm_snps)[i]
+    )
+  )
+  
+  overlap_snps <- overlap_snps %>%
+    filter(!is.na(pos))
+  
+  #x <- x+1
+  
+}
+```
+
+```{r overlap_tibble_filtering}
+
+for ( i in seq_along(overlap_snps)){
+  overlap_snps[[names(overlap_snps[i])]] <- as.numeric(
+    overlap_snps[[names(overlap_snps[i])]])
+}
+# change NAs to 0
+overlap_snps[is.na(overlap_snps)] <- 0
+
+# add in column for total 
+overlap_snps <- overlap_snps %>%
+  rowwise() %>%
+  mutate(
+    total_lat_glm= sum(
+      dplyr::c_across(
+        matches("_lat$")
+      )
+    )
+  ) %>%
+  mutate(
+    total_precip_glm= sum(
+      dplyr::c_across(
+        matches("_precip_yr$")
+      )
+    )
+  )
+```
+
+```{r curate_overlap_snps_l}
+
+# converting to long format 
+overlap_snps_l <- tidyr::pivot_longer(
+  data = overlap_snps, 
+  cols = matches(
+    "lat$|precip_yr$"
+  ), 
+  names_to = "test", 
+  values_to = "hit"
+)
+
+overlap_snps_l <- select(
+  overlap_snps_l, 
+  -matches("pval$") # remove columns with pvalues
+)
+
+overlap_snps_l2 <- tidyr::pivot_longer(
+  data = overlap_snps, 
+  cols = matches(
+    "pval$"
+  ), 
+  names_to = "test", 
+  values_to = "pval"
+)
+
+overlap_snps_l2$test <- gsub(
+  pattern = "_pval", 
+  replacement = "", 
+  x = overlap_snps_l2$test
+)
+
+# join together 
+overlap_snps_l <- full_join(
+  x = overlap_snps_l, 
+  y = overlap_snps_l2[,c("pos", "test", "pval")], 
+  by = c("pos", "test")
+)
+
+overlap_snps_l$pval <- as.numeric(overlap_snps_l$pval)
+
+overlap_snps_l <- overlap_snps_l %>%
+  mutate(
+    across(
+      pval, 
+      signif, 4
+    )
+  )
+
+overlap_snps_l$pval[overlap_snps_l$pval == 0] <- 1
+```
+
+```{r merge_mt_loci_overlap}
+
+# merge with loci data 
+overlap_snps_l <- dplyr::left_join(
+  x = overlap_snps_l, 
+  y = mt_loci_pos, 
+  by = join_by(pos >= aln_start, pos <= aln_end)
+)
+
+# separate out test column 
+overlap_snps_l <- separate(
+  data = overlap_snps_l, 
+  col = test, 
+  into = c("test", "covariate"), 
+  sep = "_"
+)
+
+```
+
+```{r save_overlap_snps}
+feather::write_feather(
+  x = overlap_snps_l, 
+  path = "~/Documents/data/lhf_d/feather/overlap_snps_02_2024.feather"
+)
+```
+
+# Plotting GLM results 
+
+After the GLM models have been run and compared, the data can be visualised by a
+through different plotting methods.
+
+## Null vs Full models 
+
+The first test completed on each of the SNPs is whether the full model (with
+Latitude and annual precipitation) fits the data significantly better than the
+null (patristic distance alone).
+
+The threshold of significance here is the alpha value (0.05) divided by the
+number of SNPs that pass the dispersion filters multiplied by the number of
+tests (in this instance 1). This is the same as the Bonferroni corrected
+p-value.
+
+```{r manhattan_null}
+
+n_snps <- 160 # change depending on the output from format_core_GLM_scores
+bon_threshold_null <- 0.05/(n_snps*1)
+
+ggplot2::ggplot(
+  data = core_GLM_scores_formatted, 
+  mapping = aes(
+    x = snp_pos,
+    y = log10(null_chisq)
+  )
+) +
+  geom_point(
+    colour = "darkorchid"
+  ) +
+  geom_line(
+    y = -1*log10(bon_threshold_null), 
+    colour = "black", 
+    linewidth = 1,
+  ) + 
+  scale_x_continuous(
+    breaks = seq(0,17000, 1000)
+  ) +
+  ylim(c(0, -20)
+  ) +
+  ylab(
+    "Logged 10 P-value"
+  ) +
+  geom_segment(
+    data = mt_loci_pos,
+    ggplot2::aes(
+      # x = Starting, 
+      x = aln_start,
+      # xend = Ending, 
+      xend = aln_end,
+      y = -15, 
+      yend = -15, 
+      col = classification
+    ),
+    size = 4, 
+    alpha = 0.6, 
+    position = ggplot2::position_jitter(
+      height = 1
+    )
+  ) +
+  scale_colour_manual(
+    values = c(
+      mtDNA_palette
+    )
+  ) +
+  theme(
+    legend.position = "right", 
+    axis.line = ggplot2::element_line(
+      linewidth = 1, 
+      colour = "black"
+    ), 
+    plot.background = ggplot2::element_rect(
+      fill = "snow"
+    ), 
+    panel.grid = ggplot2::element_line(
+      colour = "snow", 
+      linetype = "dotdash"
+    ),
+    panel.grid.major.x = ggplot2::element_line(
+      colour = "snow4", 
+      linetype = "dashed"
+    ), 
+    legend.background = ggplot2::element_rect(
+      fill = "snow"
+    )
+  )
+```
+
+This figure shows that a number of SNPs are significantly better explained by
+the full model with latitude and precipitation rather than the null model alone.
+
+> **At the very least this result alone indicates that mitochondrial DNA may not
+> be evolving as neutrally as once thought...**
+
+## Latitude & Precipitation
+
+### Drop tests
+
+The drop test asks whether the distribution of SNP genotypes is modeled
+significantly worse when one of the terms in the full model is removed. This
+takes place sequentially for all terms.
+
+> Note: the structure of this test is the main constraint for why latitude and
+> precipitation were the only environmental covariates used in the model: any
+> covariates that are highly correlated with each other will explain a
+> significant proportion of the variance of the other. E.g.: if maximum and
+> minimum temperature (which are highly correlated) are both included in the
+> model when one is dropped the remaining term will still explain much of the
+> variance. This means that the model will not perform significantly worse hence
+> false negative results will be generated.
+
+The significant threshold here is 0.05 with a Bonferroni correction to account
+for the two tests conducted and the 73 SNPs that passed the null comparison
+filter step.
+
+```{r plot_core_glm_hits}
+bon_threshold_hits <- 0.05/(n_snp_hits*2)
+
+ggplot2::ggplot(
+  data = core_GLM_hits, 
+  mapping = aes(
+    x = snp_pos,
+    y = log10(`Pr(Chi)`), 
+    colour = covariate
+  )
+) +
+  geom_point(
+  ) +
+  geom_line(
+    y = -1*log10(bon_threshold_hits), 
+    colour = "black", 
+    linewidth = 1,
+  ) + 
+  scale_x_continuous(
+    breaks = seq(0,17000, 1000)
+  ) +
+  ylim(c(0, -15)
+  ) +
+  ylab(
+    "Logged 10 P-value"
+  ) +
+  geom_segment(
+    data = mt_loci_pos,
+    ggplot2::aes(
+      # x = Starting, 
+      x = aln_start,
+      # xend = Ending, 
+      xend = aln_end,
+      y = -10, 
+      yend = -10, 
+      col = classification
+    ),
+    size = 4, 
+    alpha = 0.6, 
+    position = ggplot2::position_jitter(
+      height = 0.1
+    )
+  ) +
+  ggplot2::geom_text(
+    mapping = ggplot2::aes(
+      label = labels
+    ), 
+    size = 4,
+    nudge_x = sample(1:3, 1), 
+    nudge_y = 0.3, 
+    na.rm = TRUE, 
+    show.legend = FALSE
+  ) +
+  scale_colour_manual(
+    values = c(
+      mtDNA_palette, 
+      lat = "firebrick3",
+      precip_yr = "deepskyblue4"
+    )
+  ) +
+  theme(
+    legend.position = "right", 
+    axis.line = ggplot2::element_line(
+      linewidth = 1, 
+      colour = "black"
+    ), 
+    plot.background = ggplot2::element_rect(
+      fill = "snow"
+    ), 
+    panel.grid = ggplot2::element_line(
+      colour = "snow", 
+      linetype = "dotdash"
+    ),
+    panel.grid.major.x = ggplot2::element_line(
+      colour = "snow4", 
+      linetype = "dashed"
+    ), 
+    legend.background = ggplot2::element_rect(
+      fill = "snow"
+    )
+  )
+
+```
+
+### Stable hits 
+
+After the GLM scores have been run across the different datasets with dropped
+countries the following table/heatmap can be used to visualise which SNPs were
+identified as being significant in which runs.
+
+```{r plot_hit_stability}
+
+ggplot(
+  data = overlap_snps_l %>%
+    filter(covariate == "precip"), 
+  mapping = ggplot2::aes(
+    x = test,
+    #y = pos,
+    y = reorder(x = pos, -pval), 
+    fill = classification, 
+    #colour = Shorthand,
+    alpha = pval
+  )
+) +
+  ggplot2::geom_tile(
+    stat = "identity"
+  ) +
+  ggplot2::scale_alpha_continuous(
+    range = c(1, 0), 
+    n.breaks = 2
+   ) +
+  ggplot2::scale_fill_manual(
+    values = c( 
+      mtDNA_palette
+      )
+  ) +
+  ggplot2::geom_text(
+    mapping = ggplot2::aes(
+      x = test,
+      y = as.factor(pos), 
+      label = pval
+    ), 
+    col = "grey80",
+    size = 2.5
+  ) +
+  ggplot2::facet_grid(
+    cols = vars(covariate), 
+    #rows = vars(glm_tw)
+  ) +
+  ggplot2::theme_minimal(
+  ) +
+  #ggplot2::theme_light(
+  #) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(
+      angle = 20,
+      vjust = 0.5,
+      hjust = 0.5,
+      size = 10
+    ), 
+    axis.ticks = element_line()
+  )
+
+```
