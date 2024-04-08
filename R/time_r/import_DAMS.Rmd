@@ -1,0 +1,258 @@
+---
+title: "time_activity_assay"
+author: "FiG-T"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+toc: TRUE
+editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline
+---
+
+```{r libraries}
+
+library(stringr)
+library(readxl)
+library(lubridate)
+
+```
+
+```{r list_files}
+
+# overall directory
+activity_path <- "~/OneDrive - University College London/data/time_fitness/activity"
+
+DAMS_blocks <- list.files(
+  path = activity_path, 
+  pattern = "DAMS_b.*"  # the regex that matches the folder with monitor data 
+)
+
+# intiate a list
+monitor_list <- list() 
+
+# for every folder in the overall directory
+for (i in DAMS_blocks){
+  
+  monitor_list[[i]] <- list.files(
+    path = paste(
+    activity_path, 
+    i, 
+    sep = "/"
+    )
+  )
+  
+  message(
+    paste(
+      "Monitors from", 
+      i,
+      "added to list."
+    )
+  )
+}
+
+```
+
+```{r monitor_metafile}
+
+# read in metadata file 
+monitor_info <- read_excel(
+  path = paste0(
+    activity_path, 
+    "/", 
+    list.files(
+      path = activity_path, 
+      pattern = ".*meta.*"
+    )
+  ), 
+  col_names = TRUE
+)
+
+# convert to date type
+monitor_info$date <- dmy(monitor_info$date)
+
+# determine the number of blocs 
+blocs <- unique(monitor_info$bloc)
+
+# initiate list
+monitor_included <- list()
+
+for (j in blocs) {
+  
+  filter_table <- monitor_info %>% 
+    filter(
+      bloc == j
+    ) 
+  
+  # separate each monitor in each bloc into a separate variable in a list
+  monitor_included[[j]] <- unique(filter_table$monitor)
+  
+  monitor_included[[j]] <- str_c(
+    "Monitor", monitor_included[[j]], ".txt"
+  )
+  
+}
+
+# name the components in this list
+names(monitor_included) <- stringr::str_c(
+  "DAMS_b", blocs, sep = ""
+)
+
+
+```
+
+```{r filter_included}
+
+for( i in seq_along(monitor_list)) {
+  
+  # only include monitors in list that are also included on the metadata file
+  monitor_list[[i]] <- monitor_list[[i]][
+    monitor_list[[i]] %in% monitor_included[[i]]
+  ]
+  
+}
+
+names(monitor_list)
+
+# initiate list 
+monitor_path_list <- list()
+
+for (i in seq_along(monitor_list)) {
+  
+  bloc <- names(monitor_list)[i]
+  
+  bloc_path <- paste(
+    activity_path, 
+    bloc, 
+    sep = "/"
+  )
+  
+  #print(bloc_path)
+  
+  # for each monitor in a bloc
+  for(k in seq_along(monitor_list[[bloc]])) {
+    
+    monitor <- monitor_list[[bloc]][k]
+    
+    monitor_path <- paste(
+      bloc_path, 
+      monitor, 
+      sep = "/"
+    )
+    
+    monitor_path_list[[bloc]][k] <- monitor_path
+    
+    #print(monitor_path)
+  
+  }
+}
+
+```
+
+```{r test_build}
+
+# to test: 
+#monitor_path_list$DAMS_b2 <- monitor_path_list$DAMS_b2[1] # only take the first file
+#monitor_list_test <- list(monitor_list$DAMS_b2[1])
+#names(monitor_list_test) <- "DAMS_b2"
+
+
+str_replace_all(
+  string = monitor_list[[2]] , 
+  pattern = "[:alpha:]|[:punct:]", 
+  replacement = ""
+)
+
+#names(monitor_path_list[1])
+monitor_list[1]
+
+monitor_list<- monitor_list[names(monitor_list) %in% names(monitor_path_list) == TRUE]
+ 
+
+for (i in seq_along(monitor_path_list)) {
+  
+  path_lists <- monitor_path_list[[i]]
+  
+  monitor <- monitor_list[[i]]
+  
+  bloc <- str_replace_all(
+      string = names(monitor_path_list[i]), 
+      pattern = "[:alpha:]|[:punct:]", 
+      replacement = ""
+  )
+  
+  for (k in seq_along(path_lists)) {
+    
+    tmp_table <- read.delim(
+      file = path_lists[k], 
+      header = FALSE
+    )
+    
+    tmp_table <- tmp_table[,c(1:4,10:42)]
+    
+    names(tmp_table) <- c(
+      "index", "date", "time", "status", "light", 
+      str_c(
+        "chamber_", 
+        c(1:32), 
+        sep = ""
+      )
+    )
+    print(monitor[k])
+    
+    tmp_table$monitor <- str_replace_all(
+      string = monitor[k] , 
+      pattern = "[:alpha:]|[:punct:]", 
+      replacement = ""
+    )
+    
+    tmp_table$monitor <- as.numeric(tmp_table$monitor)
+    
+    tmp_table$bloc <- as.numeric(bloc)
+    
+    tmp_table$date <- dmy(tmp_table$date)
+    
+    #print(tail(tmp_table))
+    
+    
+    tmp_table <- left_join(
+      x = tmp_table, 
+      y = monitor_info, 
+      by = join_by(
+        monitor == monitor, 
+        bloc == bloc
+      )
+    )
+    
+    start_date <- unique(tmp_table$date.y)
+    
+    tmp_table <- tmp_table %>%
+      filter(
+        date.x >= unique(tmp_table$date.y)
+      )
+    
+    #print(tmp_table)
+    
+    if (i == 1 & k == 1) {
+      dams_table <- tmp_table
+    } else {
+      dams_table <- rbind(
+        dams_table,
+        tmp_table
+      )
+    }
+    
+  }
+  
+}
+
+dams_table <- dams_table %>%
+  select(
+    index:light, monitor, bloc, genotype, pop, 
+    chamber_1:chamber_32
+  )
+
+```
