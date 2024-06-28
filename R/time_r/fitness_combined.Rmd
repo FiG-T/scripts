@@ -1,0 +1,363 @@
+---
+title: "TIME fitness combined"
+author: "FiG-T"
+date:  "`r Sys.Date()`"
+output: 
+html_document:
+keep_md: yes
+    toc: yes
+  toc: TRUE
+  editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline
+---
+
+# Introduction
+
+Once the initial assessment of the individual fitness assays have been completed I thought it may be interesting to combine all of the fitness assays to get a comprehensive overview.
+
+## Required Libraries
+
+```{r libraries}
+
+library(dplyr)
+library(tidyr)
+library(psych)
+```
+
+## Combining population averages
+
+```{r formatting_activity_table}
+
+# format day and night activity 
+fitness_activity <- tidyr::pivot_wider(
+  data = diurnal_activity_roll, 
+  names_from = light, 
+  values_from = mean_window:sd_pop
+)
+
+names(fitness_activity) <- c(
+  "timepoint", "genotype", "pop", 
+  "activity_night", "activity_day", "act_sd_night", "act_sd_day"
+)
+
+# format peak activity
+fitness_activity_peaks <- tidyr::pivot_wider(
+  data = peak_activity, 
+  names_from = time, 
+  values_from = peak_activity:sd_pop
+)
+names(fitness_activity_peaks) <- c(
+  "timepoint","genotype", "pop", 
+  "activity_AM", "activity_PM" , "act_sd_AM", "act_sd_PM"
+)
+
+#fitness_activity_peaks <- fitness_activity_peaks %>%
+#  select(-c("monitor", "N_AM", "N_PM"))
+
+
+fitness_activity <- left_join(
+  x = fitness_activity, 
+  y = fitness_activity_peaks, 
+  by = c(
+    "genotype"="genotype",
+    "timepoint" = "timepoint",
+    "pop"="pop"
+  )
+)
+
+fitness_activity$pop <- factor(
+  fitness_activity$pop, 
+  levels = c(
+    "11", "1", "2", "3", "4", "5" , "6", "7", "8", "9", "10", "14"
+  )
+)
+```
+
+```{r format_surv_table}
+
+surv_summary_pop$pop <- factor(
+  surv_summary_pop$pop, 
+  levels = c(
+    "11", "1", "2", "3", "4", "5" , "6", "7", "8", "9", "10", "14"
+  )
+)
+```
+
+```{r pop_fitness}
+
+# merge survival and production
+pop_fitness <- dplyr::left_join(
+  x = surv_summary_pop, 
+  y = prod_mean_pop, 
+  by = dplyr::join_by(
+    timepoint, genotype, pop
+  ), 
+  suffix = c("_surv", "_prod")
+)
+
+# ... then add in activity data 
+pop_fitness <- dplyr::left_join(
+  x = pop_fitness, 
+  y = fitness_activity, 
+  by = dplyr::join_by(
+    timepoint, genotype, pop
+  ), 
+  suffix = c("", "_act")
+)
+
+names(pop_fitness)[c(4:9)] <- c(
+  "surv_5h", "surv_24h","surv_drop", "surv_sd_5h", "surv_sd_24h", "surv_sd_drop"
+  )
+
+pop_fitness_no1 <- pop_fitness %>%
+  filter(timepoint != 1)
+```
+
+## Creating general plots 
+
+```{r pairwise_plots}
+#names(pop_fitness)
+
+psych::pairs.panels(
+  x = pop_fitness[,c(
+    "surv_5h", "surv_24h", "surv_drop",
+    "mean_prod", 
+    "activity_day", "activity_night", "activity_AM", "activity_PM"
+    )], 
+  #scale = TRUE,
+  lm = TRUE, 
+  breaks = 10,
+  stars = TRUE, 
+  hist.col = "chartreuse4"
+)
+
+psych::pairs.panels(
+  x = pop_fitness_no1[,c(
+    "surv_5h", "surv_24h", "surv_drop",
+    "mean_prod", 
+    "activity_day", "activity_night", "activity_AM", "activity_PM"
+    )], 
+  #scale = TRUE,
+  lm = TRUE, 
+  breaks = 10,
+  stars = TRUE, 
+  hist.col = "chartreuse4"
+)
+```
+
+```{r scatter_plots}
+
+# create list of plots
+plot_list <- list(
+  # c("activity_AM", "activity_PM"),  
+   c("surv_drop", "surv_24h"), 
+   c("surv_drop", "mean_prod")
+   #c("surv_24h", "mean_prod")
+   #c("activity_AM", "surv_24h")
+)
+ 
+
+for (i in seq_along(plot_list)){
+  
+  print( # open print
+    
+    ggplot2::ggplot(
+  data = pop_fitness, 
+  mapping = aes(
+    x = .data[[plot_list[[i]][1]]], 
+    y = .data[[plot_list[[i]][2]]], 
+    colour = genotype,
+    fill = genotype,
+    shape = as.factor(timepoint) 
+    #alpha = as.factor(timepoint)
+  )
+  ) +
+  geom_point(
+    size = 3
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  scale_alpha_manual(
+    values = c(1, 0.5)
+  ) +
+  #scale_shape_manual(
+  #  values = c(
+  #    16, 17,
+  #    #21:25, 
+  #    #21:25, 
+  #    15
+  #  )
+  #) + 
+  xlab(
+    plot_list[[i]][1]
+  ) +
+  ylab(
+    plot_list[[i]][2]
+  ) +
+  geom_text(
+    mapping = aes(
+      label = pop
+    ), 
+    nudge_y = 1,
+    size = 8, 
+    show.legend = FALSE
+  ) +
+  TIME_theme
+
+  ) # close print
+}
+
+
+
+```
+
+## PCA analysis 
+
+```{r pca_values}
+fitness_pca <- ""
+fitness_pca <- stats::prcomp(
+  pop_fitness[,c(
+    6, 9, 10, 11, 14,15
+    #12:15
+    #18:21
+  )
+  ], 
+  scale. = TRUE, 
+  na.action = "na.omit"
+)
+
+fitness_pca_scores <- tibble::as_tibble(
+  fitness_pca$x
+)
+
+fitness_pca_scores <- cbind(
+  pop_fitness[,c(1:3)], 
+  fitness_pca_scores
+)
+```
+
+```{r plotting_pca}
+
+autoplot(
+  fitness_pca, 
+  data = pop_fitness, 
+  colour = "genotype", 
+  shape = "timepoint", 
+  indel.col = TIME_palette
+) 
+
+
+ggplot2::ggplot(
+  data = fitness_pca_scores, 
+  mapping = aes(
+    x = PC3, 
+    y = PC4, 
+    colour = genotype, 
+    shape = as.factor(timepoint)
+  )
+) +
+  geom_point(
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  TIME_theme
+```
+
+# Grouping by genotype
+
+```{r gt_fitness}
+
+gt_fitness <- pop_fitness %>%
+  group_by(
+    timepoint, genotype
+  ) %>%
+  reframe(
+    timepoint = timepoint, 
+    genotype = genotype,
+    surv_drop. = mean(surv_drop, na.rm = TRUE),
+    surv_24h. = mean(surv_24h, na.rm = TRUE),
+    prod = mean(mean_prod, na.rm = TRUE),
+    act_AM = mean(activity_AM, na.rm = TRUE), 
+    N = n(),
+    sd_surv_drop = sd(surv_drop, na.rm = TRUE),
+    sd_surv_24h = sd(surv_24h, na.rm = TRUE),
+    sd_prod = sd(mean_prod, na.rm = TRUE),
+    sd_act_AM = sd(activity_AM, na.rm = TRUE), 
+    sd_surv_5h = sd_surv_drop/sqrt(N),
+    se_surv_24h = sd_surv_24h/sqrt(N),
+    se_prod = sd_prod/sqrt(N),
+    se_act_AM = sd_act_AM/sqrt(N)
+  )
+
+```
+
+### Plotting Fitness by Genotype
+
+```{r}
+ggplot2::ggplot(
+  data = gt_fitness, 
+  mapping = aes(
+    x = surv_24h., 
+    y = prod, 
+    colour = genotype,
+    fill = genotype,
+    shape = as.factor(timepoint), 
+    #alpha = timepoint
+  )
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  geom_errorbar(
+    mapping = aes(
+      xmin = surv_24h. - sd_surv_24h, 
+      xmax = surv_24h. + sd_surv_24h
+    ), 
+    alpha = 0.2#, 
+    #colour = "snow3"
+  ) +
+  geom_errorbar(
+    mapping = aes(
+      ymax = prod + sd_prod, 
+      ymin = prod - sd_prod
+    ), 
+    alpha = 0.2#, 
+    #colour = "snow3"
+  ) +
+  geom_point(
+    size = 3
+  ) +
+  TIME_theme
+  
+  
+  scale_alpha_manual(
+    values = c(1, 0.5)
+  ) +
+  scale_shape_manual(
+    values = c(
+      16, 17,
+      21:25, 
+      21:25, 
+      15
+    )
+  ) + 
+  xlab(
+    plot_list[[i]][1]
+  ) +
+  ylab(
+    plot_list[[i]][2]
+  ) +
+  geom_text(
+    mapping = aes(
+      label = pop
+    ), 
+    nudge_y = 1,
+    size = 8, 
+    show.legend = FALSE
+  ) +
+  TIME_theme
+```

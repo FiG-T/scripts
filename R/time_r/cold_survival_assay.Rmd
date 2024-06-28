@@ -1,0 +1,406 @@
+---
+title: "Cold Tolerance Analysis"
+author: "FiG-T"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+toc: TRUE
+editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries & setup
+
+```{r libaries}
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r colour_scheme}
+
+TIME_palette <- c(
+  mX = "orchid1", 
+  tX = "darkorchid", 
+  mM = "deepskyblue2", 
+  tT = "firebrick3"
+)
+
+col2rgb(TIME_palette)
+
+TIME_theme <- theme_light(
+) +
+  theme(
+    strip.background = element_rect(
+      fill = "snow4"
+    )
+  )
+```
+
+# Introduction 
+
+As part of the experimental evolution study looking at mitonuclear
+incompatibilities (T.I.M.E) we assess the "fitness" of individuals from
+different populations on a regular basis (every 4 month = \~8 gen). There are
+three measures of fitness used, one of which is survival (following stress
+treatment). This measure is designed to approximate how well a fly can survive
+without the need for a full longevity assay (which may take months), and is thus
+more suitable for a study of this size.
+
+Flies from different populations (1-11,14) are left in a chill coma state for
+25h (\~4ºC) - this is used as the stress treatment. Upon removal the flies are
+returned to room temperature and left to recover. The number of surviving flies
+per vial (of an original 10) are then counted after 5h (survival_5h) and 24h
+(survival_24h).
+
+## Reading in the data
+
+```{r import_data}
+
+cold_surv <- readxl::read_excel(
+  path = "~/OneDrive - University College London/data/time_fitness/thermal/TIME_thermal_survival_data.xlsx", 
+  col_names = TRUE
+)
+
+```
+
+## Calculating survival fractions
+
+```{r calculate_survival}
+
+cold_surv %>% filter(survival_5h > start) # should be 0 
+
+cold_surv <- cold_surv %>% 
+  mutate(
+    # percentage survival 5 hours after removal from treatment
+    per_5h = (survival_5h / start) * 100,
+    # percentage survival 24 hours after removal from treatment
+    per_24h = (survival_24h /start) * 100, 
+    # survival percentage only including those that survived cold treatment
+    per_drop = (survival_24h/survival_5h) * 100
+  )
+
+# set the order of genotypes
+cold_surv$genotype <- factor(
+  cold_surv$genotype, 
+  levels = c("mM", "mX", "tX", "tT") 
+)
+
+# set the order of populations
+cold_surv$pop <- factor(
+  cold_surv$pop, 
+  levels = c("11", "1", "2", "3","4", "5", "6", "7","8", "9", "10", "14") 
+)
+```
+
+## Overview Plots
+
+```{r general_boxplot, warning=FALSE}
+
+# listing what to plot
+measures <- c("per_5h", "per_24h", "per_drop")
+
+for (i in measures){
+  print(
+ggplot(
+  data = cold_surv, 
+  mapping = aes(
+    x = genotype, 
+    y = cold_surv[[i]], 
+    colour = genotype
+  )
+) +
+  geom_boxplot(
+    outlier.shape = NA # do not plot outliers
+  ) +
+  geom_point(
+    position = position_dodge2(0.25),
+    alpha = 0.8
+  ) + 
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  ylim(
+    c(0,100)
+  ) +
+  ylab(
+    i
+  ) +
+  xlab(
+    "Genotype"
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  TIME_theme
+  ) # close print
+}
+
+```
+
+## Population & Genotype Summaries
+
+```{r surv_summaries}
+
+surv_summary_pop <- cold_surv %>%
+  group_by(
+    genotype, pop, timepoint # group by timepoint and population
+  ) %>%
+  # calculate mean values for the two measurements
+  reframe(
+    mean_5h = mean( # mean 5h survival
+      per_5h, 
+      na.rm = TRUE
+    ), 
+    mean_24h = mean( # mean 24h survival
+      per_24h, 
+      na.rm = TRUE
+    ), 
+    mean_drop = mean( # mean survival only included those who survived treatment
+      per_drop, 
+      na.rm = TRUE
+    ) , 
+    # calculate the standard deviations for each population
+    sd_5h = sd(
+      per_5h, 
+      na.rm = TRUE
+    ), 
+    sd_24h = sd(
+      per_24h, 
+      na.rm = TRUE
+    ), 
+    sd_drop = sd(
+      per_drop, 
+      na.rm = TRUE
+    )
+  )
+
+# using the summary supplied above - calculate mean values per genotype (and timepoint)
+surv_summary_genotype <- surv_summary_pop %>% 
+  group_by(
+    genotype, timepoint # group populations of the same genotype together
+  ) %>%
+  reframe(
+    mean_5h = mean(
+      mean_5h, 
+      na.rm = TRUE
+    ), 
+    mean_24h = mean(
+      mean_24h, 
+      na.rm = TRUE
+    ), 
+    mean_drop = mean(
+      mean_drop, 
+      na.rm = TRUE
+    ),
+    sd_5h = sd(
+      sd_5h, 
+      na.rm = TRUE
+    ), 
+    sd_24h = sd(
+      sd_24h, 
+      na.rm = TRUE
+    ), 
+    sd_drop = sd(
+      sd_drop, 
+      na.rm = TRUE
+    ), 
+    N = n()
+  )
+
+```
+
+```{r plotting_summaries_pop, warning=FALSE}
+
+y <- c("mean_5h", "sd_5h")
+y <- c("mean_24h", "sd_5h")
+y <- c("mean_drop", "sd_drop")
+
+ggplot(
+  data = surv_summary_pop, 
+  mapping = aes(
+    x = as.factor(pop), 
+    y = .data[[y[1]]], 
+    colour = genotype
+  )
+) +
+  geom_errorbar(
+    #data = surv_summary_pop,
+    mapping = aes(
+      ymin = .data[[y[1]]] - .data[[y[2]]], 
+      ymax = .data[[y[1]]] + .data[[y[2]]]
+    )
+  ) +
+    geom_point(
+      size = 5
+  ) + 
+  ylab(
+    y[1]
+  ) +
+  xlab(
+    "Population"
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) + 
+  theme_light()
+```
+
+```{r plotting_summaries_genotype}
+
+# where y = y_value, error_bar_value, y_lower_limit, y_upper_limit
+#y <- c("mean_24h", "sd_24h", 0, 100)
+#y <- c("mean_5h", "sd_5h", 90, 100)
+y <- c("mean_drop", "sd_drop", 0, 100)
+
+ggplot(
+  data = surv_summary_genotype, 
+  mapping = aes(
+    x = genotype, 
+    y = .data[[y[1]]], 
+    colour = genotype
+  )
+) +
+  geom_point(
+    size = 4
+  ) + 
+  geom_errorbar(
+    data = surv_summary_genotype,
+    na.rm = TRUE,
+    mapping = aes(
+      ymin = .data[[y[1]]] - .data[[y[2]]], 
+      ymax = .data[[y[1]]] + .data[[y[2]]]
+    )
+  ) +
+  ylim(
+    c(
+      as.numeric(y[3]), 
+      as.numeric(y[4])
+    )
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  TIME_theme
+```
+
+```{r line_plots}
+
+y <- c("mean_5h", "sd_5h")
+ylimits <- c(75, 100)
+
+ggplot(
+  data = surv_summary_pop, 
+  mapping = aes(
+    x = timepoint, 
+    y = .data[[y[1]]], 
+    colour = as.factor(genotype), 
+    linetype = as.factor(pop)
+  )
+) +
+  geom_line(
+  ) + 
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+   facet_grid(
+    cols = vars(genotype)
+  )  +
+  TIME_theme
+
+```
+
+## Normalising by mM 
+
+As there is variability in the parental lines (unexpected, but likely due to the
+effects of living in the cages) an internal control can be used to compare
+relative differences.
+
+```{r normalising_by_mM}
+
+mM_surv <- surv_summary_pop %>%
+  group_by(
+    timepoint
+  ) %>%
+  filter(
+    genotype == "mM"
+  ) %>%
+  select(timepoint, mean_drop)
+
+surv_normalised <- left_join(
+  x = surv_summary_pop, 
+  y = mM_surv, 
+  by = "timepoint"
+)
+
+surv_normalised <- surv_normalised %>%
+  reframe(
+    genotype = genotype, 
+    pop = pop,
+    timepoint = timepoint, 
+    surv_norm = mean_drop.x/mean_drop.y,
+    upper = (mean_drop.x + sd_drop)/mean_drop.y,
+    lower = (mean_drop.x - sd_drop)/mean_drop.y
+  )
+
+surv_normalised_gt <- surv_normalised %>%
+  group_by(
+    timepoint, genotype
+  ) %>%
+  reframe(
+    surv_norm_gt = mean(surv_norm),
+    sd_norm = sd(surv_norm),
+    upper = (surv_norm_gt + sd_norm),
+    lower = (surv_norm_gt - sd_norm)
+  )
+
+```
+
+```{r}
+
+# where y = y_value, error_bar_value, y_lower_limit, y_upper_limit
+#y <- c("surv_norm", "upper", "lower", "pop")
+y <- c("surv_norm_gt", "upper", "lower", "genotype")
+
+ggplot(
+  data = surv_normalised_gt, 
+  mapping = aes(
+    x = .data[[y[4]]], 
+    y = .data[[y[1]]], 
+    colour = genotype
+  )
+) +
+  geom_point(
+    size = 4
+  ) + 
+  geom_errorbar(
+    data = surv_normalised_gt,
+    na.rm = TRUE,
+    mapping = aes(
+      ymin = .data[[y[2]]], 
+      ymax = .data[[y[3]]]
+    )
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  TIME_theme
+```

@@ -13,13 +13,47 @@ editor_options:
   chunk_output_type: inline
 ---
 
+## Importing Data from Drosophila Activity Monitors
+
+Drosophila Activity Monitors (a.k.a DAMs) (TriKinetics) are a valuable tool for
+assessing the patterns of movement in fly studies. Derived metrics (peak/average
+activity, number of sleeps etc. etc) are frequently used as a proxy for
+"fitness". One advantage of the DAMs is that each monitor can simultaneously
+measure up to 32 flies, and multiple monitors can be used at once. DAMs are thus
+suitable for scaling for use in high-throughput studies.
+
+One bottleneck in this process is the importing of data into programs capable of
+performing statistical analysis. Presently this is done by copy and pasting
+blocks of data into a template excel sheet. As each monitor has a separate
+output file this has to be done for each monitor. This looks to be rather dull,
+error prone, and time consuming.
+
+The following script is my attempt to automate this process.
+
+> **The initial sections of this code show the workings of how this is achieved.
+> If you wish to immediately import data please run the required libraries then
+> skip to [The \`import_DAMs\` function] .**
+
+### Required Libraries
+
 ```{r libraries}
 
 library(stringr)
 library(readxl)
 library(lubridate)
+library(dplyr)
 
 ```
+
+### Identifying folders and DAMs output files
+
+This section of script sets the directory in which the folders containing the
+monitor outputs are kept. This assumes that the files are organised in such a
+way that the monitor output files are nested within a folder for each bloc, and
+these folders are further nested in a single folder themselves.
+
+The pattern here can be used to match the desired folders (and must be a regular
+expression).
 
 ```{r list_files}
 
@@ -55,6 +89,16 @@ for (i in DAMS_blocks){
 }
 
 ```
+
+#### The Metafile
+
+The approach used here identified all relevant folders and output files (above)
+and combines them (below) with associated data from a provided metafile. The
+following chunk is used to import this metafile into R.
+
+The metadata file must have information on the date of the experiment (in day -
+month - year format) and a "bloc" column - the information here should match (or
+partially match if numeric) the directory names.
 
 ```{r monitor_metafile}
 
@@ -104,6 +148,11 @@ names(monitor_included) <- stringr::str_c(
 
 ```
 
+Depending on how the data was copied into the directory, some redundant (not
+used) monitor output files may be present. These are removed by filtering to
+only include paths to monitors that are present in both the directory and the
+metadata file.
+
 ```{r filter_included}
 
 for( i in seq_along(monitor_list)) {
@@ -114,8 +163,6 @@ for( i in seq_along(monitor_list)) {
   ]
   
 }
-
-names(monitor_list)
 
 # initiate list 
 monitor_path_list <- list()
@@ -152,6 +199,13 @@ for (i in seq_along(monitor_list)) {
 
 ```
 
+Once the paths to all of the relevant monitors have been constructed, the data
+from each of them can be imported and merged with the associated data in the
+provided metafile.
+
+Note: this method will only keep data from equal or after the date provided in
+the metadata.
+
 ```{r test_build}
 
 # to test: 
@@ -159,17 +213,9 @@ for (i in seq_along(monitor_list)) {
 #monitor_list_test <- list(monitor_list$DAMS_b2[1])
 #names(monitor_list_test) <- "DAMS_b2"
 
-
-str_replace_all(
-  string = monitor_list[[2]] , 
-  pattern = "[:alpha:]|[:punct:]", 
-  replacement = ""
-)
-
-#names(monitor_path_list[1])
-monitor_list[1]
-
-monitor_list<- monitor_list[names(monitor_list) %in% names(monitor_path_list) == TRUE]
+monitor_list <- monitor_list[
+  names(monitor_list) %in% names(monitor_path_list) == TRUE
+]
  
 
 for (i in seq_along(monitor_path_list)) {
@@ -222,8 +268,8 @@ for (i in seq_along(monitor_path_list)) {
       x = tmp_table, 
       y = monitor_info, 
       by = join_by(
-        monitor == monitor, 
-        bloc == bloc
+        monitor == "monitor", 
+        bloc == "bloc"
       )
     )
     
@@ -255,4 +301,301 @@ dams_table <- dams_table %>%
     chamber_1:chamber_32
   )
 
+dams_table <- dams_table %>%
+  select(
+    index:light, names(monitor_info), 
+    chamber_1:chamber_32
+  )
+
+
+
+names(dams_table)[2] <- "date"
+```
+
+## The \`import_DAMs\` function
+
+To make this script applicable for regular use the following function has been
+complied. Please note that this was written based on the personal file system
+structure that I use and may therefore be temperamental is your system does not
+match this. For this reason I have also include a breakdown of the code above.
+
+```{r import_DAMs}
+
+import_DAMs <- function(
+        path,  # the path to the general directory
+        directory_pattern = "DAMS_b.*", # the regex that matches the folder with monitor data 
+        meta_pattern = ".*meta.*",  # the regex that uniquely matches the file with metadata
+        meta_col_1 = "monitor", # the column names in the metadata file
+        meta_col_2 = "bloc",
+        meta_date_col = 3,  # numeric indicator of where the date values are in the metafile
+        bloc_name = "DAMS_b", # the link between the metadata bloc value and folder name.
+        numeric_bloc = TRUE
+){
+  
+  DAMS_blocks <- list.files(
+    path = path, 
+    pattern = directory_pattern  
+  )
+  
+  # intiate a list
+  monitor_list <- list() 
+  
+  for (i in DAMS_blocks){
+    monitor_list[[i]] <- list.files(
+      path = paste(
+        path, 
+        i, 
+        sep = "/"
+      )
+    )
+    
+    # report back on progress
+    message(
+      paste(
+        "Monitors from", 
+        i,
+        "added to list."
+      )
+    )
+  }
+  
+  # read in metadata file 
+  monitor_info <- read_excel(
+    path = paste0(
+      path, 
+      "/", 
+      list.files(
+        path = path, 
+        pattern = meta_pattern
+      )
+    ), 
+    col_names = TRUE
+  )
+  
+  message(
+    paste(
+        "Metadata from ", 
+        list.files(
+          path = path, 
+          pattern = meta_pattern
+        ),
+        " successfully imported."
+      )
+  )
+  
+  # convert to date type
+  monitor_info$date <- dmy(monitor_info$date)
+
+  # determine the number of blocs 
+  blocs <- unique(monitor_info$bloc)
+  
+  # initiate list
+  monitor_included <- list()
+
+  for (j in blocs) {
+  
+    filter_table <- monitor_info %>% 
+      filter(
+        bloc == j
+      ) 
+  
+    # separate each monitor in each bloc into a separate variable in a list
+    monitor_included[[j]] <- unique(filter_table$monitor)
+  
+    monitor_included[[j]] <- str_c(
+      "Monitor", monitor_included[[j]], ".txt"
+    )
+  }
+  
+  # name the components in this list
+  names(monitor_included) <- stringr::str_c(
+    bloc_name, blocs, sep = ""
+  )
+  
+  for( i in seq_along(monitor_list)) {
+  
+    # only include monitors in list that are also included on the metadata file
+    monitor_list[[i]] <- monitor_list[[i]][
+      monitor_list[[i]] %in% monitor_included[[i]]
+    ]
+  }
+  
+  # initiate list 
+  monitor_path_list <- list()
+  
+  # import and combine activity and metadata
+  for (i in seq_along(monitor_list)) {
+  
+    bloc <- names(monitor_list)[i]
+  
+    bloc_path <- paste(
+      path, 
+      bloc, 
+      sep = "/"
+    )
+  
+    # for each monitor in a bloc
+    for(k in seq_along(monitor_list[[bloc]])) {
+    
+      monitor <- monitor_list[[bloc]][k]
+    
+      monitor_path <- paste(
+        bloc_path, 
+        monitor, 
+        sep = "/"
+      )
+    
+      monitor_path_list[[bloc]][k] <- monitor_path
+    }
+  }
+  
+  # remove monitors that are not included in the list of paths
+  monitor_list <- monitor_list[
+    names(monitor_list) %in% names(monitor_path_list) == TRUE
+  ]
+  
+  # initiate loop through directories containing monitor files
+  for (i in seq_along(monitor_path_list)) {
+  
+    path_lists <- monitor_path_list[[i]]
+  
+    monitor <- monitor_list[[i]]
+    
+    if (numeric_bloc == TRUE){
+      # remove letters and punction from folder name
+      bloc <- str_replace_all(
+        string = names(monitor_path_list[i]), 
+        pattern = "[:alpha:]|[:punct:]", 
+        replacement = ""
+      )
+    } else {
+      bloc <- names(monitor_path_list[i])
+    }
+    
+    # loop through paths within a folder
+    for (k in seq_along(path_lists)) {
+    
+      tmp_table <- read.delim(
+        file = path_lists[k], 
+        header = FALSE
+      )
+    
+      tmp_table <- tmp_table[,c(1:4,10:42)]
+    
+      names(tmp_table) <- c(
+        "index", "date", "time", "status", "light", 
+        str_c(
+          "chamber_", 
+          c(1:32), 
+          sep = ""
+        )
+      )
+    
+      message(
+        paste(
+          "Activity data imported from ", 
+          path_lists[k]
+        )
+      )
+      
+      tmp_table$monitor <- str_replace_all(
+        string = monitor[k] , 
+        pattern = "[:alpha:]|[:punct:]", 
+        replacement = ""
+      )
+        
+      tmp_table$monitor <- as.numeric(tmp_table$monitor)
+       
+      if (numeric_bloc == TRUE){
+        tmp_table$bloc <- as.numeric(bloc)
+      }
+    
+      tmp_table$date <- dmy(tmp_table$date)
+      
+      # combine with metadata
+
+      tmp_table <- left_join(
+        x = tmp_table, 
+        y = monitor_info, 
+        by = join_by(
+          monitor == "monitor", 
+          bloc == "bloc"
+        )
+      )
+      
+      # start date taken from metafile 
+      start_date <- unique(tmp_table$date.y)
+    
+      tmp_table <- tmp_table %>%
+        filter(
+          date.x >= unique(tmp_table$date.y)
+        )
+      
+      message(
+        paste(
+          "Metadata successfully combined with activity data"
+        )
+      )
+      
+      if (i == 1 & k == 1) {
+        dams_table <- tmp_table
+        
+        message(
+          "DAMs table created"
+        )
+      } else {
+        dams_table <- rbind(
+          dams_table,
+          tmp_table
+        )
+        
+        message(
+          "Information added to DAMs table"
+        )
+      }
+      
+    } # close loop through file
+  }   # close loop through folders
+  
+  dams_table <- dams_table %>%
+    select(
+      index:light, names(monitor_info)[-meta_date_col], 
+      chamber_1:chamber_32
+    )
+  
+  names(dams_table)[2] <- "date"
+   
+  message(
+    "--------------------------------------------------------------------------------
+    --------------------------------------------------------------------------------
+    Operation complete - all files imported successfully
+    --------------------------------------------------------------------------------
+    --------------------------------------------------------------------------------"
+  )
+  return(dams_table)   
+  
+} # close function
+
+
+```
+
+> > ------ Make sure that the metadata file has been updated ------
+
+```{r running_import_DAMs}
+
+dams_table <- ""
+
+dams_table <- import_DAMs(
+  path = "~/OneDrive - University College London/data/time_fitness/activity",
+  directory_pattern = "DAMS_b.*",
+  meta_pattern = ".*meta.*",
+  meta_date_col = 3,  
+  bloc_name = "DAMS_b", 
+  numeric_bloc = TRUE
+)
+
+openxlsx::write.xlsx(
+  x = dams_table, 
+  file = "~/OneDrive - University College London/data/time_fitness/activity/time_activity_data.xlsx"
+)
 ```

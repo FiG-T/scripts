@@ -1,0 +1,356 @@
+---
+title: "T.I.M.E Productivity Assay"
+author: "FiG-T"
+date: "`r Sys.Date()`"
+output: 
+html_document: 
+  keep_md: yes
+    toc: yes
+  toc: TRUE
+  editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline
+---
+
+# Introduction
+
+This markdown is for the "productivity" assay, included as part of the T.I.M.E fitness assays on experimentally evolving *Drosophila melanogaster* populations.
+
+> Productivity is considered here to be:
+>
+> *The number of adult offspring arising from a single female.*
+
+# Libraries 
+
+```{r libraries}
+library(dplyr)
+library(readxl)
+library(tidyr)
+```
+
+# Palettes
+
+```{r theme_setup}
+# set the palette
+TIME_palette <- c(
+  mX = "orchid1", 
+  tX = "darkorchid", 
+  mM = "deepskyblue2", 
+  tT = "firebrick3"
+)
+
+col2rgb(TIME_palette)
+
+TIME_theme <- theme_light(
+) +
+  theme(
+    strip.background = element_rect(
+      fill = "snow4"
+    )
+  )
+```
+
+# Importing data 
+
+Raw data can be imported directly from the excel file. This has information on:
+
+-   the genotype (mX, tX, mM, tT)
+
+-   the population (1-14)
+
+-   the subsample (1_30)
+
+-   the timepoint
+
+-   the number of adults recorded
+
+```{r import_data}
+# import data 
+prod_data <- readxl::read_excel(
+  path = "~/OneDrive - University College London/data/time_fitness/production/time_production_raw_data.xlsx", 
+  sheet = "productivity", 
+  col_names = TRUE
+)
+
+# remove notes column
+prod_data <- prod_data %>%
+  select(
+    genotype:production
+  )
+
+# rename production column 
+names(prod_data)[5] <- "n_adults"
+```
+
+# Data processing 
+
+```{r format_data}
+# set levels for genotype 
+prod_data$genotype <- factor(
+  prod_data$genotype, 
+  levels = c("mM", "mX", "tX", "tT")
+  )
+# set levels for pop
+prod_data$pop <- factor(
+  prod_data$pop, 
+  levels = c("11",
+             "12","13",
+             "1", "2", "3", "4", "5" , "6", "7", "8", "9", "10",
+             "14", "15", "16")
+  )
+
+
+```
+
+The data can be grouped by population and/or genotype, along with timepoint.
+
+To get an overview of the data:
+
+```{r overview_plot}
+# to create the boxplot - used to spot any obvious errors in the data 
+ggplot2::ggplot(
+  data = prod_data, 
+  mapping = aes(
+    x = pop, 
+    y = n_adults,
+    fill = genotype
+  )
+) +
+  geom_boxplot(
+  ) +
+  scale_fill_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  TIME_theme
+
+```
+
+## Population averages
+
+```{r population_averages}
+
+# summarise per population per genotype
+prod_mean_pop <- prod_data %>% 
+  group_by(
+    pop, timepoint
+  ) %>%
+  reframe(
+    genotype = genotype, 
+    pop = pop, 
+    timepoint = timepoint, 
+    mean_prod = mean(n_adults, na.rm = TRUE), 
+    sd_prod = sd(n_adults, na.rm = TRUE), 
+    N = n(), 
+    se_prod = sd_prod/sqrt(N)
+  ) %>%
+  distinct()
+```
+
+```{r plot_pop_averages, warning=FALSE, message=FALSE}
+
+# group by timepoint, plot pop summaries 
+ggplot2::ggplot(
+  data = prod_mean_pop, 
+  mapping = aes(
+    x = pop, 
+    y = mean_prod, 
+    colour = genotype
+  )
+) + 
+  geom_errorbar(
+    mapping = aes(
+      ymin = mean_prod - sd_prod, 
+      ymax = mean_prod + sd_prod
+    ), 
+    alpha = 0.5, 
+    width = 0.3
+  ) +
+  geom_point(
+    size = 5
+  ) +
+  ylab(
+    "Number of Adult Offspring"
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  TIME_theme
+```
+
+```{r save_pop_plots}
+# to save the above plot
+ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/time_fitness/time_productivity_pop_means_06_2024.png", 
+  plot = last_plot(),
+  width = 9, 
+  height = 6, 
+  bg = "transparent"
+)
+```
+
+```{r line_plots}
+
+# to create the line plot:
+ggplot2::ggplot(
+  data = prod_mean_pop, 
+  mapping = aes(
+    x = timepoint, 
+    y = mean_prod, 
+    colour = genotype, 
+    fill = genotype, 
+    linetype = pop
+  )
+) + 
+  geom_errorbar(
+    mapping = aes(
+      ymin = mean_prod - sd_prod, 
+      ymax = mean_prod + sd_prod
+    ), 
+    alpha = 0.5, 
+    width = 0.3, 
+    position = position_dodge(0.4), 
+    show.legend = FALSE
+  ) +
+  geom_point(
+    size = 3, 
+    position = position_dodge(0.4)
+  ) +
+  geom_line(
+    position = position_dodge(0.4), 
+    show.legend = FALSE
+  ) + 
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  scale_fill_manual(
+    values = TIME_palette
+  ) +
+  scale_linetype_manual(
+    values = c(
+      "solid", "solid", "solid",
+      "dashed", "dashed", "dashed","dashed", "dashed",  
+      "dashed", "dashed", "dashed","dashed", "dashed", 
+      "solid", "solid", "solid"
+    )
+  ) +
+  TIME_theme
+```
+
+```{r save_line_plots}
+ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/time_fitness/time_productivity_pop_lines_06_2024.png", 
+  plot = last_plot(),
+  width = 9, 
+  height = 6, 
+  bg = "transparent"
+)
+```
+
+## Genotype averages
+
+```{r genotype_averages}
+
+prod_mean_gt <- prod_mean_pop %>% 
+  group_by(
+    genotype, timepoint
+  ) %>%
+  reframe(
+    genotype = genotype, 
+    timepoint = timepoint, 
+    mean_prod_gt = mean(mean_prod, na.rm = TRUE), 
+    sd_prod = sd(mean_prod, na.rm = TRUE), 
+    N = n(), 
+    se_prod = sd_prod/sqrt(N)
+  ) %>%
+  distinct()
+
+```
+
+```{r plot_genotype_averages}
+
+ggplot2::ggplot(
+  data = prod_mean_gt, 
+  mapping = aes(
+    x = genotype, 
+    y = mean_prod_gt, 
+    colour = genotype
+  )
+) +
+  geom_errorbar(
+    mapping = aes(
+      ymin = mean_prod_gt - sd_prod, 
+      ymax = mean_prod_gt + sd_prod
+    ), 
+    width = 0.3
+  ) +
+  geom_point(
+    size = 3
+  ) +
+  ylab(
+    "Number of Adult Offspring (per female)"
+  ) +
+  scale_alpha_manual(
+    values = c(1, 0.5)
+  ) + 
+  scale_colour_manual(
+    values = TIME_palette
+  ) + 
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  TIME_theme
+
+```
+
+```{r save_gt_summary_plot}
+
+ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/time_fitness/time_productivity_gt_means_06_2024.png", 
+  plot = last_plot(),
+  width = 9, 
+  height = 8, 
+  bg = "transparent"
+)
+
+```
+
+## Summary Stats
+
+```{r prod_mod}
+
+prod_mod <- lme4::lmer(
+  data = prod_data, 
+  formula = n_adults ~ genotype + pop + timepoint + (1|replicate)
+)
+
+
+prod_aov <- car::Anova(prod_mod)
+prod_aov
+
+anova(prod_mod)
+
+prod_emm <- emmeans::emmeans(
+  prod_mod, 
+  pairwise ~ genotype + timepoint , 
+  adjust = "tukey"
+)
+prod_emm
+
+prod_contrasts <- tibble::as_tibble(prod_emm$contrasts)
+names(prod_contrasts)
+
+prod_contrasts %>%
+  filter(
+    p.value <= 0.05
+  ) %>%
+  select(
+    contrast, p.value
+  )
+```
