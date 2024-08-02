@@ -1,0 +1,703 @@
+---
+title: "SNPs of Interest - Part II"
+author: "FiG-T"
+data: "`r Sys.Date()`"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+toc: TRUE
+editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline
+---
+
+# Introduction
+
+```{r libraries}
+
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(tidyr)
+
+```
+
+### Palettes
+
+```{r}
+
+FiGT_continent_palette <- c(
+  Africa = "deepskyblue4",
+  Asia = "firebrick4", 
+  Europe ="orchid3", 
+  `North America` ="chartreuse4",
+  `South America` = "chartreuse3",
+  Oceania = "turquoise"
+  )
+
+```
+
+## Required Data
+
+```{r required_data}
+
+# load in paleo info
+paleo_wcvp_outbreaks <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_meta_paleo_wcvp_outbreaks_05_2024.feather"
+)
+```
+
+# SNP linkage
+
+```{r calculate_SNP_cor}
+
+GT_cor <- Hmisc::rcorr(
+  as.matrix(
+    lhf_gt_pc_st2_meta[,c(43:ncol(lhf_gt_pc_st2_meta))]
+  )
+)
+
+#GT_cor$r[lower.tri(GT_cor$r)] <- NA
+
+GT_cor <- reshape2::melt(
+  GT_cor$r,
+  na.rm = TRUE
+)
+
+GT_cor$value <- round(
+  x = GT_cor$value, 
+  digits = 3
+)
+```
+
+```{r change_labels}
+# to match the rCRS positions
+
+GT_cor_pos <- GT_cor %>%
+  filter( str_detect(Var1, "pos_.*")) %>%
+  select(Var1) %>%
+  tidyr::separate(
+    Var1, 
+    c("text","pos"), 
+    sep = "_"
+  ) %>%
+  distinct
+
+GT_cor_pos$pos <- as.numeric(GT_cor_pos$pos)
+
+GT_cor_pos <- left_join(
+  GT_cor_pos, 
+  rCRS, 
+  by = c("pos" = "aln_pos")
+)
+ 
+GT_cor_pos$rCRS_pos <- stringr::str_c(
+  "pos_", 
+  GT_cor_pos$rCRS_pos
+)
+GT_cor_pos$pos <- stringr::str_c(
+  "pos_", 
+  GT_cor_pos$pos
+)
+ 
+for(i in seq_len(nrow(GT_cor_pos))) {
+  GT_cor <- GT_cor %>%
+    mutate(
+      Var1 = str_replace_all(
+        Var1, 
+        pattern = GT_cor_pos$pos[i], 
+        replacement = GT_cor_pos$rCRS_pos[i]
+      )
+    )
+  
+  GT_cor <- GT_cor %>%
+    mutate(
+      Var2 = str_replace_all(
+        Var2, 
+        pattern = GT_cor_pos$pos[i], 
+        replacement = GT_cor_pos$rCRS_pos[i]
+      )
+    )
+}
+
+GT_cor_env <- GT_cor %>%
+  filter( ! str_detect(Var1, "pos_.*")) %>%
+  select(Var1) %>%
+  distinct() 
+
+GT_cor_env <- c(GT_cor_env$Var1)
+
+GT_cor$Var1 <- factor(
+  x = GT_cor$Var1, 
+  levels = c(
+    GT_cor_env,
+    c(GT_cor_pos$rCRS_pos)
+  )
+)
+
+GT_cor$Var2 <- factor(
+  x = GT_cor$Var2, 
+  levels = c(
+    GT_cor_env,
+    c(GT_cor_pos$rCRS_pos)
+  )
+)
+
+
+#levels(GT_cor$Var2)
+```
+
+```{r plot_correlations}
+ggplot2::ggplot(
+  data = GT_cor,
+  ggplot2::aes(
+    x = Var2,
+    y = Var1,
+    fill = value
+  )
+) +
+  geom_tile(
+    colour = "white"
+  ) +
+  geom_text(
+    mapping = aes(
+      label = value
+    ), 
+    #size = 1.25 # if saving to pdf
+    size = 2.5
+  ) +
+  xlab("")+
+  ylab("")+
+  scale_fill_gradient2(
+    low = "deepskyblue4",
+    high = "darkorchid3",
+    mid = "snow3",
+    midpoint = 0,
+    #limit = c(0.5,1),
+    #space = "Lab",
+    #name="Pearson\nCorrelation"
+  ) +
+  theme(
+    axis.text.x = element_text(
+      angle = 55,
+      vjust = 0.5,
+      hjust = 0.5,
+      size = 5
+    ), 
+    axis.text.y = element_text(
+      angle = 5,
+      vjust = 0.5,
+      hjust = 0.5, 
+      size = 4
+    ), 
+    legend.position = "bottom"
+    # axis.title = element_blank(), 
+    # legend.position = "none"
+  ) +
+  transparent_theme
+```
+
+Note that these SNPs are phased to the rCRS.
+
+```{r save_SNP_correlation_plot}
+
+ggplot2::ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_core_GLM_hits_correlation_heatmap_06_2024.png",
+  plot = last_plot(),
+  bg = "transparent", 
+  width = 12, 
+  height = 7
+)
+
+```
+
+## Results
+
+From initial inspection:
+
+-   All the environmental variable correlate reasonably well with each other.
+
+-   NPP and LAI correlate with precipitation variables (NPP more so than LAI)
+
+-   SNPs within the mtDNA membrane Attachment Site (ATT) correlate strongly with
+    each other (and are thus likely linked)
+
+-   Blocks of SNPs correlate - these are not necessarily adjacent. *Are these
+    indicative of haplogroups/haplogroup markers.*
+
+-   Some SNPs do correlate with select environmental variables (see box below)
+
+> SNPs that correlate:
+>
+> 8701: link with T_wetQ_paleo
+>
+> 10238: correlates (+vely) with precipitation variables
+>
+> 8251: correlates (-vely) with precipitation variables
+>
+> 3010: -ve correlation with temp variables
+
+# Allele Frequencies
+
+As well as looking at correlation/ linkage blocs between SNPs, I want to
+understand *where* each SNP is common - this will help inform us about what is
+the likely selective pressure and aid understanding of why a specific SNP may be
+relevant.
+
+## Calculating Allele Frequency by Country
+
+```{r calculate_AF}
+
+# convert to long format 
+lhf_AF_long <- pivot_longer(
+  data = lhf_gt_pc_st2_meta, 
+  cols = matches("pos_.*"), 
+  names_to = "position", 
+  values_to = "genotype"
+)
+
+# group by country and SNP
+lhf_AF_long <- lhf_AF_long %>%
+  group_by(
+    iso3, position 
+  ) %>%
+  filter(genotype %in% c(0, 1) ) %>%  # only include first 2 alleles
+  reframe(
+    continent = continent,
+    maf = mean(genotype)
+  ) %>%
+  distinct()
+```
+
+Use the labels defined above to replace SNP positions with rCRS aligned values
+
+```{r rename_pos_af}
+
+for(i in seq_len(nrow(GT_cor_pos))) {
+  
+  lhf_AF_long <- lhf_AF_long %>%
+    mutate(
+      position = str_replace_all(
+        position, 
+        pattern = GT_cor_pos$pos[i], 
+        replacement = GT_cor_pos$rCRS_pos[i]
+      )
+    )
+  
+}
+
+lhf_AF_long$position <- factor(
+  x = lhf_AF_long$position, 
+  levels = c(GT_cor_pos$rCRS_pos)
+  
+)
+
+#levels(lhf_AF_long$position)
+```
+
+```{r quick_plot_af, warning=FALSE}
+
+for (i in levels(lhf_AF_long$position)) {
+  
+  data <- lhf_AF_long %>%
+    filter(position == i)
+  
+  print(
+    ggplot(
+      data = data, 
+        mapping = aes(
+          x = reorder(x = iso3, +maf), 
+          y = maf, 
+          fill = continent
+       )
+    ) + 
+    geom_col(
+    ) +
+    scale_fill_manual(
+      values = FiGT_continent_palette
+    ) +
+    ylab(
+      paste0(
+        "Allele Frequency for ", i
+      )
+    ) +
+    theme(
+      axis.text.x = element_text(
+        angle = 90, 
+        size = 3.5
+      )
+    ) +
+    xlab(
+      "Country (ISO3 code)"
+    ) +
+    ylim(
+      c(0,1)
+    ) #+
+    #theme_light()
+  )
+}
+
+```
+
+It would be interesting to see allele frequencies vs environmental metrics:
+
+```{r format_metadata}
+
+lhf_AF_long <- left_join(
+  x = lhf_AF_long,
+  y = paleo_wcvp_outbreaks, 
+  by = c("iso3")
+)
+```
+
+```{r af_env_plotter, warning=FALSE, message=FALSE}
+
+af_env_plotter <- function(
+        input, 
+        positions, 
+        scores_input
+) {
+  
+  # load in data 
+  data <- input
+  
+  # load in score data
+  scores <- scores_input
+  
+  scores$labels <- str_c(
+    "pos_", 
+    scores$rCRS_pos
+  )
+  
+  for (i in positions) {
+    
+    # filter for a specific position
+    data_filtered <- data %>%
+      filter(position == i)
+    
+    scores_filtered <- scores %>%
+      filter(labels == i )
+    
+    env_var <- scores_filtered$covariate
+    
+    #message(env_var)
+    
+    plot <- ggplot(
+      data = data_filtered, 
+        mapping = aes(
+          y = maf, 
+          x = .data[[env_var]] , 
+          fill = continent, 
+          colour = continent
+       )
+      ) + 
+      #geom_smooth(
+        #inherit.aes = FALSE,
+      #  mapping = aes(
+      #    x = maf, 
+      #    y = .data[[env_var]]
+      #  ), 
+      #  method = 'lm', 
+      #  #colour = "black", 
+      #  se = FALSE,
+      #  alpha = 0.75
+      #) +
+      geom_smooth(
+        inherit.aes = FALSE,
+        mapping = aes(
+          y = maf, 
+          x = .data[[env_var]]
+        ), 
+        method = 'lm', 
+        colour = "black", 
+        #se = FALSE,
+        alpha = 0.75
+      ) +
+      geom_point(
+        size = 3
+      ) +
+      scale_fill_manual(
+        values = FiGT_continent_palette
+      ) +
+      scale_colour_manual(
+        values = FiGT_continent_palette
+      ) +
+      ylab(
+        paste0(
+          "Allele Frequency for ", i
+        )
+      ) +
+      theme(
+        axis.text.x = element_text(
+          angle = 90, 
+          size = 3.5
+        )
+      ) +
+      xlab(
+        env_var
+      ) +
+      theme_light()
+  
+    # print plot
+    
+    print(plot)
+  
+  } # close loop
+  
+}
+
+```
+
+```{r af_env_plots}
+
+pdf(
+  file =  "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_GLMM_EnvvsAF_scatters_05_2024.pdf", 
+  width = 8, 
+  height = 6, 
+  onefile = TRUE
+)
+
+
+af_env_plotter(
+  input = lhf_AF_long, 
+  positions = c(levels(lhf_AF_long$position)), 
+  scores_input = lhf_st2_GLMM_min
+)
+
+dev.off()
+```
+
+## Looking Functional Effects
+
+Once the GLMMs have been calculated, the possible functional consequences of the
+SNPs can be assessed. One approach to this is to pair up the SNPs with ENSEMBL's
+Predicted Effects (ensembl.org).
+
+## Creating a VCF for the GLMM hits 
+
+```{r list_snp_pos_hits}
+snp_pos_hits <- unique(lhf_st2_GLMM_min$snp_pos)
+
+snp_pos_hits <- str_c(
+  1, 
+  snp_pos_hits, 
+  sep = " "
+)
+
+write.table(
+  x = snp_pos_hits, 
+  sep = "\t", 
+  row.names = FALSE, 
+  file = "~/Documents/data/lhf_d/vcf/GLMM_hits_snp_pos.txt"
+)
+# find and replace " with blank in the output file 
+# check that the CHROM column says "MT"
+```
+
+> Check that the CHROM is corrected to specify that this is the mitochondrial genome
+
+VCFtools can once again be used to filter the original VCF to only contain sites
+that were detected as significant in the GLMMs.
+
+```{bash}
+
+# select only the required postions from the VCF
+vcftools --vcf snp_sites_filtered_vcf_maf0.005_noRef_092023.recode.vcf --positions GLMM_hits_snp_pos.txt --recode --out snp_pos_GLMM_hits_052024 
+
+# manually change the positions to match the reference genome (there must be a better way of doing this)
+
+# compress this file 
+gzip --keep rCRS_pos_GLMM_hits_052024.vcf
+```
+
+These two files can then be used in the SIFT database (protein coding regions only) and for the ENSEMBL VEP (all regions).  For more information on how to format these files please see MITOMAP_mutations.Rmd. 
+
+The consensus sequence can also be used to extract sequences for a specific region. 
+
+```{r generate_specific_sequence}
+
+# load in the consensus sequence (from the alignment)
+consenus_sequence <- read.delim(
+  file = "~/Documents/data/lhf_d/fasta/lhf_multiple_alignment_consensus.txt", 
+  header = FALSE
+)
+
+# convert this into a long vector
+consenus_sequence <- str_split(
+  consenus_sequence, 
+  boundary("character")
+)
+```
+
+``` {r specific_sequences}
+
+# copy to a new sequence section
+rRNA_16S <- consenus_sequence
+
+# add in your alternate (if required)
+rRNA_16S[[1]][3060] <- "a"
+
+# filter to include the alignment positions
+rRNA_16S <- rRNA_16S[[1]][c(1715:3281)]
+
+# write in a flat string to an output file
+write(
+  x = str_flatten(rRNA_16S), 
+  file = "~/Documents/data/lhf_d/fasta/rRNA_16S_consensus_mut3010.txt", 
+  sep = ""
+)
+
+```
+
+## Combining Hits and Predicted effects
+
+```{r vep}
+
+vep <- read.csv(
+  file = "~/Documents/data/lhf_d/ensembl_VEP_formatted_specific.csv"
+)
+
+lhf_st2_GLMM_min_vep <- left_join(
+  x = lhf_st2_GLMM_min, 
+  y = vep, 
+  by = join_by(
+    "rCRS_pos" == "pos" 
+  )
+)
+
+write.csv(
+  x = lhf_st2_GLMM_min_vep, 
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_st2_GLMM_min_hits_loci_VEP_05_2024.csv"
+)
+
+```
+
+```{r vep_manhattan, warning=FALSE}
+st2_hit_length <- length(unique(lhf_st2_GLMM_min_vep$rCRS_pos))
+
+bon_threshold_hits <- alpha/(st2_hit_length*8)
+
+ggplot2::ggplot(
+  data = lhf_st2_GLMM_min_vep,
+  mapping = aes(
+    x = rCRS_pos,
+    y = log10_scores, 
+    colour = covariate
+  )
+) +
+  geom_point(
+    mapping = aes(
+      shape = Consequence
+    ),
+    size = 3
+  ) +
+  geom_line(
+    y = -1*log10(bon_threshold_hits), 
+    colour = "black", 
+    linewidth = 1,
+  ) + 
+  scale_x_continuous(
+    breaks = seq(0,17000, 1000)
+  ) +
+  ylim(c(1, -10)
+  ) +
+  ylab(
+    "Logged 10 P-value"
+  ) +
+ # geom_segment(
+#    data = mt_loci_pos,
+#    ggplot2::aes(
+#      x = Starting, 
+#      #x = aln_start,
+#      xend = Ending, 
+#      #xend = aln_end,
+#      y = 0.5, 
+#      yend = 0.5, 
+#      col = classification
+#    ),
+#    size = 4, 
+#    alpha = 0.8, 
+#    position = ggplot2::position_jitter(
+#      height = 0.1
+#    ), 
+#    show.legend = "FALSE"
+#  ) +
+#  #ggplot2::geom_text(
+  #  mapping = ggplot2::aes(
+  #    label = labels
+  #  ), 
+  #  size = 4,
+  #  nudge_x = sample(1:3, 1), 
+  #  nudge_y = 0.3, 
+  #  na.rm = TRUE, 
+  #  show.legend = FALSE
+  #) +
+  scale_colour_manual(
+    values = c(
+      mtDNA_palette, 
+      meta_var_palette
+    )
+  ) +
+  theme_minimal()+
+  theme(
+    legend.position = "bottom", 
+    axis.line = ggplot2::element_line(
+      linewidth = 1, 
+      colour = "black"
+    ), 
+    plot.background = ggplot2::element_rect(
+      fill = "white"
+    ), 
+    panel.grid = ggplot2::element_line(
+      colour = "white", 
+      linetype = "dotdash"
+    ),
+    panel.grid.major.x = ggplot2::element_line(
+      colour = "snow4", 
+      linetype = "dashed"
+    ), 
+    legend.background = ggplot2::element_rect(
+      fill = "white"
+    )
+  ) +
+  transparent_theme
+
+```
+
+
+
+
+```{r isolate_seq}
+interest_fasta <- seqinr::read.fasta(
+  file = "~/Documents/data/lhf_d/fasta/aln_mafft_incRef_filtered_3_09_2023.fasta"
+)
+
+interest_fasta <- bind_rows(interest_fasta)
+
+str(tRNA_TT)
+
+tRNA_TT <- interest_fasta[c(15955:16020),]
+
+tRNA_TT <- t(tRNA_TT)
+
+# convert to a tibble 
+tRNA_TT <- tidyr::as_tibble(
+  tRNA_TT,
+  rownames = "samples" # retain the rownames (ids) and place into a column. 
+)
+
+tRNA_TT <- tRNA_TT %>%
+  unite(
+    sequence,
+    V1:names(tRNA_TT)[ncol(tRNA_TT)], 
+    sep = ""
+  )
+
+tRNA_TT <- tRNA_TT %>%
+  select(sequence) %>%
+  distinct()
+
+```
+

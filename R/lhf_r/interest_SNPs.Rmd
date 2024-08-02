@@ -43,6 +43,37 @@ mtDNA_palette <- c(
   tRNA = "chartreuse4"
 )
 
+meta_var_palette <- c(
+  # stage 1 variable
+  lat = "firebrick3",
+  precip_yr = "deepskyblue3", 
+  
+  # Thermo & diet var
+  T_seasonality_paleo = "darkorchid",
+  # Thermo variable
+  T_wetQ_paleo = "hotpink2", 
+  mean_T_coldQ_paleo = "hotpink4",
+  # Diet variables climate
+  T_dryQ_paleo = "orchid", 
+  precip_dryQ_paleo = "darkorchid4", 
+  # Diet plant measures
+  lai_paleo = "chartreuse3", 
+  endemic_area = "chartreuse4",
+  npp_paleo = "palegreen4",
+  # Disease varible
+  outbreaks_area = "darkorange2"
+)
+
+meta_var_palette_2 <- c(
+  T_seasonality_paleo = "black",
+  # Thermo variable
+  T_wetQ_paleo = "turquoise4", 
+  mean_T_coldQ_paleo = "turquoise3",
+  precip_dryQ_paleo = "turquoise", 
+  # Diet plant measures
+  endemic_area = "yellow3",
+  npp_paleo = "yellow"
+)
 ```
 
 # Introduction
@@ -59,16 +90,45 @@ annual precipitation in each test.
 
 ```{r import data}
 
+core_GLM_scores_formatted_phased <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_07_2024.feather"
+)
+
 # Using the feather package
 interest_snps <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/overlap_snps_02_2024.feather"
+  path = "~/Documents/data/lhf_d/feather/overlap_snps_05_2024.feather"
 )
 
 head(interest_snps)
 
+# mtDNA loci positioning 
+mt_loci_pos <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/mtDNA_loci_all_positions_classifications.feather"
+)
+
 SNP_classification_N <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/SNP_classification_N.feather"
 )
+
+lhf_gt_meta_pc_ds_hits <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_hits_05_2024.feather"  
+)
+
+paleo_wcvp_outbreaks <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_meta_paleo_wcvp_outbreaks_05_2024.feather"
+)
+
+mutations_Cfrm <- read.csv(
+  file = "~/Documents/data/lhf_d/mutations_Cfrm_MITOMAP_2024_05_13.csv"
+)
+mutations_all <- read.csv(
+  file = "~/Documents/data/lhf_d/Mutations_all_MITOMAP.csv"
+)
+
+vep <- read.csv(
+  file = "~/Documents/data/lhf_d/ensembl_VEP_formatted.csv"
+)
+
 ```
 
 This contains information on:
@@ -91,20 +151,33 @@ will apply the additional filter of:
 -   only include SNPs that were found in 6/6 iterations of the GLM (therefore
     are theoretically stable)
 
-```{r filtering_format}
+```{r filtering_format, include = FALSE}
+
+#bon_threshold_hits <- alpha/(n_snp_hits*n_tests)
+
+interest_snps_all <- unique(
+  core_GLM_scores_formatted_phased$snp_pos[core_GLM_scores_formatted_phased$null_label == "T"]
+)
 
 interest_snps <- interest_snps %>%
-  #filter(hit == 1) %>% # only include significant hits from GLM
-  filter(total_lat_glm == 6 | total_precip_glm ==6) %>% # only include sites significant in all runs 
-  filter(test == "all") %>%
-  filter(pval < 0.05/(73*2)) %>%
-  select(pos,total_lat_glm, total_precip_glm, pval, covariate, Map.Locus, Shorthand, classification, aln_start, aln_end) 
+  filter(pos %in% interest_snps_all) %>%
+  filter(test == "ds") %>%
+  select(
+    pos, rCRS_pos, hit, total_lat_glm, total_precip_glm, pval, 
+    covariate, Map.Locus, Shorthand, classification, Starting, Ending
+  ) 
 
-# create vector of lat SNPs
+length(interest_snps_all)
+
+# define the cutoffs 
+n_tests <-  2 # length(unique(interest_snps$test)) 
+n_snp_hits <- length(interest_snps_all)
+
+# create vector of lat SNPs ------------------------------------------------
 interest_snps_lat <- unique(
   c(
   interest_snps$pos[
-    interest_snps$covariate == "lat" & interest_snps$total_lat_glm == 6 
+    interest_snps$covariate == "lat" & interest_snps$hit == 1 
   ]
  )
 )
@@ -113,13 +186,15 @@ interest_snps_lat <- unique(
 interest_snps_precip_yr <- unique(
   c(
   interest_snps$pos[
-    interest_snps$covariate == "precip" & interest_snps$total_precip_glm == 6
+    interest_snps$covariate == "precip" & interest_snps$hit == 1
   ]
  ) 
 )
 
+interest_snps_lat_precip <- interest_snps_lat[interest_snps_lat %in% interest_snps_precip_yr == TRUE]
 
-# format factor levels 
+
+# format factor levels -------
 interest_snps$classification <- factor(
   x = interest_snps$classification, 
   levels = c(
@@ -140,18 +215,25 @@ interest_snps$Map.Locus <- factor(
   )
 )
 
+# merge with loci information data
 interest_snps <- left_join(
   interest_snps, 
   SNP_classification_N, 
   by = "Map.Locus"
 )
 
+interest_snps$st1_hit[interest_snps$pos %in% interest_snps_lat] <- "lat"
+interest_snps$st1_hit[interest_snps$pos %in% interest_snps_precip_yr] <- "precip"
+interest_snps$st1_hit[interest_snps$pos %in% interest_snps_lat_precip ] <- "both"
+interest_snps$st1_hit[is.na(pos$st1_hit)] <- "nor"
+
 ```
 
-```{r}
+```{r SNP_loci_counts}
 interest_snps_loci <- interest_snps %>%
+  filter(hit == 1) %>%
   reframe(
-    .by = c(Map.Locus, covariate),
+    .by = c(Map.Locus),
     classification = classification, 
     locus_snps = N, 
     N = n(), 
@@ -161,9 +243,21 @@ interest_snps_loci <- interest_snps %>%
     per_locus = (N/locus_snps)*100
   )
 
+interest_snps_loci$Map.Locus <- factor(
+  x = interest_snps_loci$Map.Locus, 
+  levels = c(
+    "MT-ATT", "MT-CR", # Attachment site and control region
+    "MT-ND1", "MT-ND2", "MT-ND3", "MT-ND4", "MT-ND5", "MT-ND6",
+    "MT-CYB",
+    "MT-CO1","MT-CO2", "MT-CO3", 
+    "MT-ATP6", "ATP8",
+    "MT-RNR1", "MT-RNR2", 
+    "MT-TT", "MT-TG", "MT-TR", "MT-TH" 
+  )
+)
 ```
 
-```{r snp_hits_formatting}
+```{r snp_hits_formatting, include=FALSE}
 
 # reformat this table to be more concise 
 interest_snps_loci <- interest_snps %>%
@@ -171,12 +265,12 @@ interest_snps_loci <- interest_snps %>%
     .by = c(Map.Locus, covariate),
     N = n(), 
     classification = classification, 
-    aln_end = aln_end,
-    aln_start = aln_start
+    Ending = Ending,
+    Starting = Starting
   ) %>%
   distinct() %>%
   mutate(
-    per_snp = (N/(aln_end - aln_start)) * 100 # calculate the % mutations per loci 
+    per_locus = (N/(Ending - Starting)) * 100 # calculate the % mutations per loci 
   )
 
 
@@ -195,7 +289,8 @@ ggplot(
   )
 ) + 
   geom_bar(
-    stat = "identity"
+    stat = "identity", 
+    show.legend = FALSE
   ) +
   ggplot2::scale_fill_manual(
     values = mtDNA_palette # see palette above
@@ -207,42 +302,879 @@ ggplot(
     colour = "black", 
     nudge_y = 5
   ) +
-  facet_grid(
-    cols = vars(
-      covariate
-    )
-  ) +
+  #facet_grid(
+  #  cols = vars(
+  #    Map.Locus
+  #  )
+  #) +
   ylab(
-    "Percentage of Loci with significant hits (%)"
+    "Percentage of SNPs with \n significant hits (%)"
   ) +
   xlab(
     "mtDNA Loci"
   ) +
-  theme_minimal(
+  theme_light(
   ) +
   ggplot2::theme(
     axis.text.x = ggplot2::element_text(
-      angle = 40,
-      vjust = 0.5,
-      hjust = 0.5,
-      size = 8
+      angle = 45,
+      vjust = 0.9,
+      hjust = 0.9,
+      size = 25
+    ),
+     axis.text.y = ggplot2::element_text(
+      size = 16
+    ),
+    axis.title.y = ggplot2::element_text(
+      size = 25
     )
-  )
+  ) + 
+  transparent_theme
+
+ggplot2::ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_hits_loci_overview_07_2024.png",
+  plot = last_plot(),
+  bg = "transparent", 
+  width = 11, 
+  height = 7
+)
 
 ```
 
 This plot shows that :
 
--   Latitude hits are more frequent in protein-coding regions
 
--   There are more hits for precipitation than latitude in the membrane
-    attachment site
+# Adding additional metadata
 
--   All hits withing the control region are also within the membrane attachment
-    site.
+Given the complications of creating models with highly-correlated variables,
+Latitude (up to this point) has been used as a proxy for the environmental
+temperature covariates. For further explanation of this please see the GLM
+section of the earlier markdowns.
 
--   There are only latitude related hits within the tRNA regions (bacteria
-    paper?)
+Precipitation was also used as a broad environmental variable however more
+specific factors can be considered for further analysis.
+
+```{r combine_extra_metadata}
+
+# merge with genotype data
+lhf_gt_pc_st2_meta <- left_join(
+  x = lhf_gt_meta_pc_ds_hits, 
+  y = paleo_wcvp_outbreaks, 
+  by = "iso3"
+)
+
+# reorder columns
+lhf_gt_pc_st2_meta <- lhf_gt_pc_st2_meta %>%
+  select(
+    acc:precip_seasonality, area, 
+    native:outbreaks_area, 
+    mean_T_yr_paleo:lai_paleo, 
+    pos_156:pos_16464
+  )
+
+names(lhf_gt_pc_st2_meta)[c(7, 12)] <- c("country", "iso2")
+```
+
+These variables all also need to be scaled before use in the GLMM.
+
+```{r scale_st2_meta}
+
+for (x in c(25:42)){
+  
+  col <- names(lhf_gt_pc_st2_meta)[x]
+  
+  lhf_gt_pc_st2_meta[[col]] <- scale(lhf_gt_pc_st2_meta[[col]])
+}
+```
+
+# Testing Multiple Models
+
+## Functions
+
+```{r GLM_multi_scorer_function}
+
+# define function for later use
+GLM_multi_scorer <- function(
+        input,  # the data to use
+        start_col = 43, # where the genotype information starts
+        col_to_use = "NULL",
+        test_formulas = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
+        null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+        format_table = FALSE # should the output be returned as a list (default) or a table?
+        
+  ){
+  
+  library(dplyr)
+  
+  # define columns to use
+  if (col_to_use[1] == "NULL") { 
+    col_pos <- c(
+      start_col:ncol(input)
+    ) 
+  } else {
+    col_pos <- col_to_use
+  }
+  
+  chisq_scores <- list()  # initiate an empty list 
+  
+  # start loop
+  for (i in col_pos){  # for each column with genotype data
+    
+    glm_gt_bi <- input %>%
+      filter_at(
+        vars(i), 
+        all_vars(. == 1 | . == 0)  # only include 2 alleles
+      )
+    
+    message( paste(
+      nrow(glm_gt_bi), 
+      " columns in dataset"
+    )
+    )
+    
+    # select position
+    snp <- names(  # test data without 2s... 
+      glm_gt_bi
+    )[i]
+    
+    message(snp)
+    
+    snp_pos <- stringr::str_extract(  # define the SNP being modelled
+      string = snp, 
+      pattern = "\\d+"
+    )
+    
+    message(snp_pos)
+    
+     # create Null formula
+    formula_null <- as.formula(
+      paste(
+        snp, null_formula # combine the NULL formula from above with the column with SNP data. 
+      )
+    )
+    
+    # create null model with 
+    null_mod <- lme4::glmer( 
+      data = glm_gt_bi,
+      formula = formula_null ,
+      family = "binomial",  # as the genotype data is either 1 or 0 
+      control = lme4::glmerControl(
+        optimizer = "bobyqa", 
+        optCtrl = list(maxfun = 100000)
+      )
+    )
+    print(null_mod)
+    
+    #print(anova(null_mod))
+    
+    chi_sqs <- list() # initiate and empty list
+    
+    for (i in seq_along(test_formulas)){ # for each test formula... 
+      
+      tryCatch({  # open a catch test
+      
+      formula <- as.formula(
+        paste(
+          snp, test_formulas[i] # pair with SNP under investigation
+        )
+      )
+      
+      # run model
+      mod <- lme4::glmer( 
+        data = glm_gt_bi,
+        formula = formula ,
+        family = "binomial", 
+        control = lme4::glmerControl(
+          optimizer = "bobyqa", 
+          optCtrl = list(maxfun = 100000)
+        )
+      )
+      
+      print(mod)
+      #print(summary(mod))
+      
+      # compare null and full model 
+      null_df <- as.data.frame(
+        anova(
+          null_mod, 
+          mod, 
+          test = "Chisq"
+        )
+      )
+      
+      print(null_df)
+      
+      chisq_df <- cbind( 
+        # bind the anova together to the SNP position and the formula being used. 
+        null_df, 
+        snp_pos,
+        test_formulas[i] 
+      ) 
+      
+      message("anova scores created")
+      
+      chi_sqs[[i]] <- chisq_df # add this table into the intiated list
+      
+      print(chi_sqs[[i]])
+      
+      }, 
+      error = function(e) {  # define what to do if an error occurs
+      message( 
+        paste(
+          "Model did not converge for", test_formulas[i], "- Skipping to the next test formula. 
+          --------------------------------------------------------"
+        )
+      )
+    }
+  ) # close Catch loop
+      
+    } # close test formula loop
+    
+    # add this list of tables (for each formula per snp) to a larger list 
+    chisq_scores[[snp]] <- chi_sqs 
+    
+    message("Scores added into big list")
+    # calculate overdispersion
+   # glm_overdisp <- overdisp_fun(mod)
+    
+    message(
+      paste(
+        snp , " - Chi Squared scores calculated"
+      )
+    )
+  
+  }
+  message("All Chi Squared Scores returned")
+  
+  if (format_table == TRUE) { 
+    # if table output is specified merge the lists together... 
+    chisq_scores <- bind_rows(chisq_scores)
+  }
+  
+  return(chisq_scores)
+  
+  #if(format_table == FALSE){
+  #  return(chisq_scores_patr)
+  #} 
+  
+}
+```
+
+```{r core_GLM_multi_scorer_parallel}
+core_GLM_multi_scorer_parallel <- function(
+        input, 
+        start_col = 43, 
+        col_to_use = NULL,
+        test_formula , 
+        null_formula , 
+        format_table = NULL, 
+        num_cores = 1 
+) {
+  # define blocks of SNPs to have in each chunk
+  col_chunks <- split(
+    start_col:ncol(input), 
+    ceiling(
+      seq_along(start_col:ncol(input)) / num_cores
+    )
+  )
+  
+  message(
+    paste(
+      num_cores, "cores used"
+    )
+  )
+  
+  results <- parallel::mclapply(
+    col_chunks, 
+    function(chunk){
+      
+      adj_start <- start_col + min(chunk) -1
+      
+      GLM_chi_multi_scorer(
+        input, 
+        start_col = adj_start, 
+        chunk, 
+        test_formula, 
+        null_formula
+      )
+    }, 
+    mc.cores = num_cores
+  )
+  
+  result_df <- do.call(rbind, results)
+  
+  return(result_df)
+  
+}
+```
+
+## Running GLMM tests
+
+Define the test formulas that you wish to run:
+
+Here paleo factors are separated out as there are 198 individuals from Tonga and
+the Cook Islands for which no paleo reconstructions are available. This thus
+requires a slightly separate null, which necessitates a separate function call.
+
+```{r test_formulas}
+test_formulas <- c(
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat", 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + precip_yr",
+  #"~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + tmp_range_yr",
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + native_area", 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + endemic_area",
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + outbreaks_area"
+)
+
+test_formulas_paleo <- c(
+  #"~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + mean_T_yr_paleo",
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + T_seasonality_paleo",  # error 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + T_wetQ_paleo",
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + T_dryQ_paleo", 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + mean_T_warmQ_paleo", ### error 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + mean_T_coldQ_paleo", 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + precip_yr_paleo", 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + precip_dryQ_paleo", 
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + precip_coldQ_paleo",
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + npp_paleo",
+  "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lai_paleo"
+)
+
+
+```
+
+```{r run_multi_scorer}
+
+lhf_st2_GLM_scores <- core_GLM_multi_scorer_parallel(
+  input = lhf_gt_pc_st2_meta, 
+  start_col = 43, 
+  num_cores = 6, 
+  test_formula = test_formulas, 
+  null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+  format_table = TRUE
+)
+
+lhf_st2_GLM_scores_paleo <- core_GLM_multi_scorer_parallel(
+  input = lhf_gt_pc_st2_meta %>%
+    filter(!is.na(mean_T_yr_paleo)), 
+  start_col = 43, 
+  num_cores = 6, 
+  test_formula = test_formulas_paleo, 
+  null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+  format_table = TRUE
+)
+
+lhf_st2_GLM_scores_tb <- dplyr::bind_rows(lhf_st2_GLM_scores, .id = "Check Number")
+
+lhf_st2_GLM_scores_paleo_tb <- dplyr::bind_rows(lhf_st2_GLM_scores_paleo, .id = "Check Number")
+
+
+glmm_3010 <- lme4::glmer( 
+        data = lhf_gt_pc_st2_meta,
+        formula = "pos_3060 ~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + T_wetQ_paleo" ,
+        family = "binomial", 
+        control = lme4::glmerControl(
+          optimizer = "bobyqa", 
+          optCtrl = list(maxfun = 100000)
+        )
+      )
+```
+```{r 3010_mod}
+anova(glmm_3010)
+
+```
+
+```{r run_interaction_scorer}
+lhf_st2_GLM_scores_interact <- core_GLM_multi_scorer_parallel(
+  input = lhf_gt_pc_st2_meta, 
+  start_col = 43, 
+  num_cores = 6, 
+  test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat * precip_yr",  # include interaction
+  null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr", 
+  format_table = TRUE
+)
+
+lhf_st2_GLM_scores_interact_tb <- dplyr::bind_rows(lhf_st2_GLM_scores_interact, .id = "Check Number")
+
+```
+
+```{r format_st2_hits}
+
+lhf_st2_GLMM_scores <- rbind(
+  lhf_st2_GLM_scores_tb, 
+  lhf_st2_GLM_scores_paleo_tb
+)
+
+lhf_st2_GLMM_scores <- lhf_st2_GLMM_scores %>%
+  filter(!is.na(Chisq)) %>%
+  filter(snp_pos %in% interest_snps_all)
+
+lhf_st2_GLMM_scores$snp_pos <- as.numeric(lhf_st2_GLMM_scores$snp_pos)
+
+# extract covariate names 
+lhf_st2_GLMM_scores$covariate <- str_extract(
+  string = lhf_st2_GLMM_scores$`test_formulas[i]`, 
+  pattern =  "tmp_max|tmp_min|tmp_yr|tmp_range_drl|isotherm|tmp_seasonality|tmp_range_yr|lat|mean_T_yr_paleo|T_seasonality_paleo|T_wetQ_paleo|T_dryQ_paleo|mean_T_warmQ_paleo|mean_T_coldQ_paleo|precip_yr_paleo|precip_dryQ_paleo|precip_coldQ_paleo|npp_paleo|lai_paleo|native_area|endemic_area|outbreaks_area|precip_yr" 
+)
+
+# bind to rCRS positions
+lhf_st2_GLMM_scores <- left_join(
+  x = lhf_st2_GLMM_scores, 
+  y = rCRS, 
+  by = join_by("snp_pos" == "aln_pos")
+)
+
+lhf_st2_GLMM_scores$log10_scores <- log10(lhf_st2_GLMM_scores$`Pr(>Chisq)`)
+
+lhf_st2_GLMM_scores$st1_hit[lhf_st2_GLMM_scores$snp_pos %in% interest_snps_lat] <- "lat"
+lhf_st2_GLMM_scores$st1_hit[lhf_st2_GLMM_scores$snp_pos %in% interest_snps_precip_yr] <- "precip"
+lhf_st2_GLMM_scores$st1_hit[lhf_st2_GLMM_scores$snp_pos %in% interest_snps_lat_precip ] <- "both"
+lhf_st2_GLMM_scores$st1_hit[is.na(lhf_st2_GLMM_scores$st1_hit)] <- "nor"
+```
+
+```{r save_st2_hits}
+#feather::write_feather(
+  x = lhf_st2_GLMM_scores, 
+  path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_scores_05_2024.feather"
+)
+
+#feather::write_feather(
+  x = lhf_st2_GLM_scores_paleo_tb, 
+  path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_scores_paleo_05_2024.feather"
+)
+```
+
+```{r st2_GLMM_scores_w}
+# convert to wide format
+lhf_st2_GLMM_scores_w <- pivot_wider(
+  data = lhf_st2_GLMM_scores,
+  id_cols = c(rCRS_pos,value, st1_hit),
+  names_from = covariate, 
+  values_from = log10_scores
+) 
+```
+
+# Processing GLMM scores
+
+## Correlations between variables
+
+As I was not exactly sure which variables (especially the quarterly paleo ones)
+are highly related predictors, I wanted to check which (if any) result in highly
+correlated responses. Any that are will be slimmed down and only one will be
+used in further analysis.
+
+```{r predictor_correlations}
+
+# plot plant - related values
+psych::pairs.panels(
+  x = lhf_st2_GLMM_scores_w[,c(3:8,18,19)], 
+  lm = TRUE, 
+  stars = TRUE, 
+  hist.col = "chartreuse4"
+)
+
+# cant fit col 10 for some reason?
+psych::pairs.panels(
+  x = lhf_gt_pc_st2_meta[,c(9,22,33,34,35,37,39,41,42,29, 31)], 
+  lm = TRUE, 
+  stars = TRUE, 
+  hist.col = "deepskyblue4"
+)
+
+```
+
+## Defining significance thresholds
+
+Looking at this and whether the variable is thermoregulation, diet, or disease
+related we keep the following variables:
+
+```{r GLMM_formatting}
+
+var_to_keep <- c(
+  #"lat", "precip_yr",
+  "T_seasonality_paleo", "T_wetQ_paleo", "T_dryQ_paleo", "mean_T_coldQ_paleo",   "precip_dryQ_paleo", "npp_paleo" ,
+ # "lai_paleo", 
+  "endemic_area", #"native_area",
+  "outbreaks_area", 
+  #"mean_T_warmQ_paleo"
+ "precip_yr_paleo", "mean_T_yr_paleo"
+)
+
+# only keep specified variables
+lhf_st2_GLMM_scores_f <- lhf_st2_GLMM_scores %>%
+  filter(covariate %in% var_to_keep)
+
+# this determines the significance threshold: 
+alpha <- 0.01
+n_snps_st2 <- length(unique(lhf_st2_GLMM_scores_f$rCRS_pos))
+n_tests <- length(unique(lhf_st2_GLMM_scores_f$covariate))
+
+bon_threshold_st2 <- alpha/(n_snps_st2*n_tests)
+log10(bon_threshold_st2)
+```
+
+## Merging with position data
+
+To investigate where significant hits are distributed across the genome we can combine this with mt_loci_position data. 
+
+```{r join_mt_loci}
+
+lhf_st2_GLMM_scores_f <- left_join(
+  lhf_st2_GLMM_scores_f, 
+  mt_loci_pos, 
+  by = join_by(
+    rCRS_pos >= Starting, 
+    rCRS_pos <= Ending
+  )
+)
+
+lhf_st2_GLMM_scores_f$classification <- factor(
+  x = lhf_st2_GLMM_scores_f$classification, 
+  levels = c(
+    "ATT", "C_I", "C_III", "C_IV", "C_V", "C_R", "rRNA", "tRNA" 
+  )      
+)
+
+lhf_st2_GLMM_scores_f$Map.Locus <- factor(
+  x = lhf_st2_GLMM_scores_f$Map.Locus, 
+  levels = c(
+    "MT-ATT", "MT-CR", # Attachment site and control region
+    "MT-ND1", "MT-ND2", "MT-ND3", "MT-ND4", "MT-ND5", "MT-ND6",
+    "MT-CYB",
+    "MT-CO1","MT-CO2", "MT-CO3", 
+    "MT-ATP6", "ATP8",
+    "MT-RNR1", "MT-RNR2", 
+    "MT-TT", "MT-TG", "MT-TR", "MT-TH" 
+  )
+)
+
+```
+
+## Summary Metrics
+
+```{r format_sig_scores}
+
+# Calculate the number of SNPs for which each covariate is significant
+lhf_st2_GLMM_N <- lhf_st2_GLMM_scores_f %>%
+  filter(`Pr(>Chisq)` <= bon_threshold_st2) %>% # pvalue adjusted for the number of groups
+  group_by(covariate) %>%
+  reframe( 
+    N = n()#, 
+    #st1_hit = st1_hit
+  ) %>%
+  distinct()
+
+lhf_st2_GLMM_N$covariate <- factor(
+  x = lhf_st2_GLMM_N$covariate, 
+  levels = c(
+    # thermo measures
+    "T_seasonality_paleo",
+    "T_wetQ_paleo","mean_T_coldQ_paleo", 
+     # Diet plant measures
+    "T_dryQ_paleo", "precip_dryQ_paleo",
+    #"lai_paleo",
+    "npp_paleo", "endemic_area",
+    "outbreaks_area"
+  )
+)
+
+
+lhf_st2_GLMM_N$theory[lhf_st2_GLMM_N$covariate %in% c(
+  # Thermo & diet var
+  "T_seasonality_paleo",
+  # Thermo variable
+  "T_wetQ_paleo","mean_T_coldQ_paleo"
+)] <- "thermo"
+
+lhf_st2_GLMM_N$theory[lhf_st2_GLMM_N$covariate %in% c(
+ "T_dryQ_paleo", "precip_dryQ_paleo",
+  # Diet plant measures
+  "lai_paleo","endemic_area","npp_paleo"
+)] <- "diet"
+
+ 
+
+# create a table with the most significant covariates for each SNP
+lhf_st2_GLMM_min <- lhf_st2_GLMM_scores_f %>%
+  filter(`Pr(>Chisq)` <= bon_threshold_st2) %>%
+  #filter(!covariate %in% c("lat", "precip_yr")) %>%
+  group_by(rCRS_pos) %>%
+  slice_min(log10_scores) %>%
+  select(
+    snp_pos, logLik, `Pr(>Chisq)`, st1_hit, 
+    covariate, rCRS_pos, value, log10_scores,
+    Map.Locus, classification, Starting, Ending, length
+  ) %>%
+  filter(
+    classification != "C_R"   # only add once you have checked all C_R hits fall within the ATT
+  ) %>%
+  distinct()
+
+# count the number of times a covariate is the strongest hit: 
+
+lhf_st2_GLMM_min_N <- lhf_st2_GLMM_min %>%
+  group_by(covariate) %>%
+  reframe(
+    N = n()
+  ) %>%
+  distinct #%>%
+  reframe(
+    covariate = covariate,
+    Map.Locus = Map.Locus,
+    total_n = sum(N), 
+    percent = (N/total_n)*100, 
+    N = N
+  )
+  
+lhf_st2_GLMM_min_N$covariate <- factor(
+  x = lhf_st2_GLMM_min_N$covariate, 
+  levels = c(
+    # thermo measures
+    "T_seasonality_paleo",
+    "T_wetQ_paleo","mean_T_coldQ_paleo", 
+     # Diet plant measures
+    "T_dryQ_paleo", "precip_dryQ_paleo",
+    #"lai_paleo",
+    "npp_paleo", "endemic_area", 
+    "outbreaks_area"
+    
+  )
+)
+
+
+lhf_st2_GLMM_summaries <- list(
+  lhf_st2_GLMM_N,
+  lhf_st2_GLMM_min_N
+  )
+
+```
+
+## Adding in Known Effects 
+
+Using the data from the MITOMAP database (see alternate Rmd for import details.)
+
+```{r add_Cfrm_mutations}
+lhf_st2_GLMM_min <- lhf_st2_GLMM_min[,c(1:13)]
+
+lhf_st2_GLMM_min <- lhf_st2_GLMM_min %>%
+  distinct()
+
+lhf_st2_GLMM_min_mm <- left_join(
+  x = lhf_st2_GLMM_min, 
+  y = mutations_all, 
+  by = join_by(
+    rCRS_pos == Position
+  )
+)
+
+lhf_st2_GLMM_min_vep <- left_join(
+  x = lhf_st2_GLMM_min_mm, 
+  y = vep, 
+  by = join_by(
+    snp_pos == pos # note: here the VEP data uses the VCF/alignment positions, not the rCRS
+  )
+)
+
+
+```
+
+
+## Manhattan Plot
+
+```{r st2_GLMM_manhattan, warning=FALSE}
+
+ggplot(
+  #data = lhf_st2_GLMM_scores_f, 
+  data = lhf_st2_GLMM_min,  # see above
+  mapping = aes(
+    y = log10_scores, 
+    x = rCRS_pos
+  )
+  ) + 
+  geom_point(
+    mapping = aes(
+      colour = covariate, 
+      shape = st1_hit
+    ), 
+    size = 4, 
+    #show.legend = FALSE
+  ) + 
+  ggplot2::geom_line(
+    y = -1*log10(bon_threshold_st2), 
+    colour = "black", 
+    linewidth = 1
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c(
+      mtDNA_palette, 
+      meta_var_palette
+    )
+  ) +
+  scale_shape_manual(
+    values = c(
+      15, 17, 16, 18
+    )
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = seq(0,17000, 1000)
+  ) +
+  ylim(
+    values = c(1, -12)
+  ) + 
+  ggplot2::ylab(
+    "Logged P-value"
+  ) +
+  geom_segment(
+    data = mt_loci_pos,
+    ggplot2::aes(
+      x = Starting, 
+      xend = Ending,
+      y = 0.5, 
+      yend = 0.5, 
+      col = classification
+    ),
+    linewidth = 4, 
+    alpha = 0.8, 
+    position = ggplot2::position_jitter(
+      height = 0.1
+    )
+  ) + 
+  theme_minimal()+
+  theme(
+    legend.position = "top", 
+    axis.line = ggplot2::element_line(
+      linewidth = 1, 
+      colour = "black"
+    ), 
+    plot.background = ggplot2::element_rect(
+      fill = "snow"
+    ), 
+    panel.grid = ggplot2::element_line(
+      colour = "snow", 
+      linetype = "dotdash"
+    ),
+    panel.grid.major.x = ggplot2::element_line(
+      colour = "snow4", 
+      linetype = "dashed"
+    ), 
+    legend.background = ggplot2::element_rect(
+      fill = "snow"
+    )
+  ) +
+  theme_light()
+
+```
+
+
+```{r GLMM_summary_plot}
+
+to_plot <- c("N", "N")
+
+
+for(i in seq_along(lhf_st2_GLMM_summaries)) {
+
+#for(i in 2) { 
+  
+  table <- lhf_st2_GLMM_summaries[[i]]
+  
+  print(
+    ggplot2::ggplot(
+      data = table, 
+      mapping = ggplot2::aes(
+        x = covariate, 
+        y = .data[[to_plot[i]]], 
+        fill = covariate
+      )
+    ) +
+      geom_col(
+        position = position_dodge2(0.2)
+      ) +
+      scale_fill_manual(
+        values = meta_var_palette_2
+      ) +
+      geom_text(
+        mapping = aes(
+          label = N
+        ), 
+        size = 15,
+        nudge_y = 2
+      ) +
+      #facet_grid(
+      #  rows = vars(classification)
+      #) +
+      theme_minimal(
+      ) +
+      ggplot2::theme(
+        axis.text.x = element_text(
+          angle = 90,
+          vjust = 0,
+          hjust = 0,
+          size = 25
+        ), 
+        axis.title.y = element_text(
+         size = 25
+        ),
+        legend.position = "none"
+      )
+  )
+}
+```
+
+```{r save_paleo_hits}
+ggplot2::ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf/lhf_st2_GLMM_min_hits_06_2024.png",
+  plot = last_plot(),
+  bg = "transparent", 
+  width = 11, 
+  height = 11
+)
+
+```
+
+```{r heatmap}
+
+ggplot2::ggplot(
+  data = lhf_st2_GLMM_N %>%
+    filter(!covariate %in% c("lat", "precip_yr")), 
+  mapping = aes(
+    x = Map.Locus, 
+    y = covariate, 
+    fill = N
+  )
+) + 
+  geom_tile() +
+  scale_fill_gradient(
+    low = "orchid",
+    high = "darkorchid4", 
+    
+  ) +
+  facet_grid(
+    rows = vars(theory)
+    ) +
+  theme_light(
+  ) +
+  ggplot2::theme(
+    axis.text.x = element_text(
+      angle = 90,
+      vjust = 0,
+      hjust = 0,
+      size = 12
+    )
+  ) +
+  transparent_theme
+
+
+ggplot2::ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_st2_GLMM_Nhits_05_2024.png",
+  plot = last_plot(),
+  bg = "transparent", 
+  width = 10, 
+  height = 6
+)
+```
+
+
+
 
 # Investigating LAT hits
 
@@ -265,418 +1197,6 @@ these are:
 
 -   yearly temperature range
 
-```{r load_gt_data}
-
-interest_gt_data <- read_feather(
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pd_KC345983.feather"
-) # generated in lhf_glm_patr.R
-  # NOTE: THIS DATA IS SCALED!
-
-
-lat_interest_gt_data <- interest_gt_data %>%
-  select(
-    c(
-      samples:patr_KC345983, # select metadata columns 
-      matches(
-        paste0(
-            "pos_", interest_snps_lat # select sites that are noted of interest
-        )
-      )
-    )
-  )
-
-```
-
-```{r GLM_scorer_function}
-
-# define function for later use
-GLM_chi_multi_scorer <- function(
-        input,  # the data to use
-        start_col = 21, # where the genotype information starts
-        col_to_use = "NULL",
-        test_formulas = "~ patr_KC345983 + lat + precip_yr + (1|iso2)", 
-        null_formula = "~ patr_KC345983 + (1|iso2)", 
-        format_table = FALSE # should the output be returned as a list (default) or a table?
-        
-  ){
-  
-  library(dplyr)
-  
-  # define columns to use
-  if (col_to_use == "NULL") {
-    col_pos <- c(
-      start_col:ncol(input)  # define the columns where the genotype data is held
-    ) 
-  } else {
-    col_pos <- col_to_use 
-  }
-  
-  chisq_scores <- list()  # initiate an empty list 
-  
-  # start loop
-  for (i in col_pos){  # for each column with genotype data
-    
-    glm_gt_bi <- input %>%
-      filter_at(
-        vars(i), 
-        all_vars(. == 1 | . == 0)  # only include 2 alleles
-      )
-    
-    # select position
-    snp <- names(  # test data without 2s... 
-      glm_gt_bi
-    )[i]
-    
-    snp_pos <- stringr::str_extract(  # define the SNP being modelled
-      string = snp, 
-      pattern = "\\d+"
-    )
-    
-     # create Null formula
-    formula_null <- as.formula(
-      paste(
-        snp, null_formula # combine the NULL formula from above with the column with SNP data. 
-      )
-    )
-    
-    # create null model with patristic distance
-    null_mod <- lme4::glmer( 
-      data = glm_gt_bi,
-      formula = formula_null ,
-      family = "binomial",  # as the genotype data is either 1 or 0 
-      control = lme4::glmerControl(
-        optimizer = "bobyqa", 
-        optCtrl = list(maxfun = 10000)
-      )
-    )
-    #print(null_mod)
-    
-    #print(anova(null_mod))
-    
-    chi_sqs <- list() # initiate and empty list
-    
-    for (i in seq_along(test_formulas)){ # for each test formula... 
-      
-      formula <- as.formula(
-        paste(
-          snp, test_formulas[i] # pair with SNP under investigation
-        )
-      )
-      
-      # run model
-      mod <- lme4::glmer( 
-        data = glm_gt_bi,
-        formula = formula ,
-        family = "binomial", 
-        control = lme4::glmerControl(
-          optimizer = "bobyqa", 
-          optCtrl = list(maxfun = 10000)
-        )
-      )
-      
-      #print(mod)
-      #print(summary(mod))
-      
-      # compare null and full model 
-      null_df <- as.data.frame(
-        anova(
-          null_mod, 
-          mod, 
-          test = "Chisq"
-        )
-      )
-      
-      chisq_df <- cbind( 
-        # bind the anova together to the SNP position and the formula being used. 
-        null_df, 
-        snp_pos,
-        test_formulas[i] 
-      ) 
-      
-      chi_sqs[[i]] <- chisq_df # add this table into the intiated list
-      
-      #print(chi_sqs[[i]])
-    }
-    
-    # add this list of tables (for each formula per snp) to a larger list 
-    chisq_scores[[snp]] <- chi_sqs 
-    
-    # calculate overdispersion
-   # glm_overdisp <- overdisp_fun(mod)
-    
-    
-    message(
-      paste(
-        snp , " - Chi Squared scores calculated"
-      )
-    )
-    
-  }
-  
-  message("All Chi Squared Scores returned")
-  
-  if (format_table == TRUE) { 
-    # if table output is specified merge the lists together... 
-    chisq_scores <- bind_rows(chisq_scores)
-  }
-  
-  return(chisq_scores)
-  
-  #if(format_table == FALSE){
-  #  return(chisq_scores_patr)
-  #} 
-}
-
-```
-
-```{r GLM_scorer_tmp_var}
-
-# define test formulas
-test_formulas <- c(
-  "~ patr_KC345983 + tmp_max + (1|iso2)", 
-  "~ patr_KC345983 + tmp_min + (1|iso2)",
-  "~ patr_KC345983 + tmp_yr + (1|iso2)",
-  "~ patr_KC345983 + tmp_range_drl + (1|iso2)",
-  "~ patr_KC345983 + isotherm + (1|iso2)",
-  "~ patr_KC345983 + tmp_seasonality + (1|iso2)",
-  "~ patr_KC345983 + tmp_range_yr + (1|iso2)", 
-  "~ patr_KC345983 + lat + (1|iso2)"
-)
-
-# run the GLM scorer on the test formulas
-lat_interest_chi_sq <- GLM_chi_multi_scorer(
-  input = lat_interest_gt_data, 
-  test_formulas = test_formulas
-)
-
-# bind the list items together
-lat_interest_chi_sq <- bind_rows(lat_interest_chi_sq)
-
-# convert SNPs value to numeric
-lat_interest_chi_sq$snp_pos <- as.numeric(lat_interest_chi_sq$snp_pos)
-
-# extract covariate names 
-lat_interest_chi_sq$covariate <- str_extract(
-  string = lat_interest_chi_sq$`test_formulas[i]`, 
-  pattern =  "tmp_max|tmp_min|tmp_yr|tmp_range_drl|isotherm|tmp_seasonality|tmp_range_yr|lat", 
-  
-)
-
-```
-
-```{r tmp_var_ggplot}
-
-ggplot(
-  data = lat_interest_chi_sq, 
-  mapping = aes(
-    y = log10(`Pr(>Chisq)`), 
-    x = snp_pos, 
-    #colour = `test_formulas[i]`, 
-    #shape = `test_formulas[i]`
-  )
-  ) + 
-  geom_point(
-    mapping = aes(
-      colour = covariate,
-      shape = covariate
-    ), 
-    size = 4
-  ) +
-  ggplot2::scale_colour_manual(
-    values = c( 
-      mtDNA_palette,
-      isotherm = "orchid2", 
-      tmp_max = "black", 
-      tmp_min = "deepskyblue3", 
-      tmp_range_drl = "chartreuse3", 
-      tmp_range_yr = "chartreuse4", 
-      tmp_seasonality = "darkorchid4", 
-      tmp_yr = "darkorange2", 
-      lat = "firebrick3"
-    )
-  ) +
-  scale_shape_manual(
-    values = c(
-      15,17,19,0,1,2,8,3
-    )
-  ) +
-  ggplot2::geom_line(
-    y = -1*log10(0.05/(79*6)), 
-    colour = "black", 
-    linewidth = 1
-  ) + 
-  ggplot2::scale_x_continuous(
-    breaks = seq(0,17000, 1000)
-  ) +
-  ggplot2::ylim(c(0, -10)
-  ) +
-  ggplot2::ylab(
-    "Logged P-value"
-  ) +
-  geom_segment(
-    data = mt_loci_pos,
-    ggplot2::aes(
-      x = aln_start, 
-      xend = aln_end,
-      y = - 7.5, 
-      yend = -7.5, 
-      col = classification
-    ),
-    linewidth = 4, 
-    alpha = 0.6, 
-    position = ggplot2::position_jitter(
-      height = 0.2
-    )
-  ) +
-  ggplot2::theme(
-    legend.position = "right", 
-    axis.line = ggplot2::element_line(
-      linewidth = 1, 
-      colour = "black"
-    ), 
-    plot.background = ggplot2::element_rect(
-      fill = "snow"
-    ), 
-    panel.grid = ggplot2::element_line(
-      colour = "snow", 
-      linetype = "dotdash"
-    ),
-    panel.grid.major.x = ggplot2::element_line(
-      colour = "snow4", 
-      linetype = "dashed"
-    ), 
-    legend.background = ggplot2::element_rect(
-      fill = "snow"
-    )
-  ) +
-  theme_minimal()
-
-```
-
-This plot shows the p-values for each of the temperature variables for each of
-the SNPs. By eye it looks like isothermality is the most significant for many of
-the variables.
-
-```{r most_sig_scores}
-
-# Calculate the number of SNPs for which each covariate is significant
-lat_interest_chi_sq_sum <- lat_interest_chi_sq %>%
-  filter(`Pr(>Chisq)` <= (0.05/(length(interest_snps_lat)*7))) %>% # pvalue adjusted for the number of groups
-  group_by(covariate) %>%
-  reframe( N = n())
-
-lat_interest_chi_sq_sum
-
-# create a table with the most significant covariates for each SNP
-lat_interest_chi_sq_min <- lat_interest_chi_sq %>%
-  filter(`Pr(>Chisq)` <= (0.05/(length(interest_snps_lat)*7))) %>%
-  filter(covariate %in% c(
-    "tmp_min","tmp_max", "tmp_yr", "tmp_range_yr", "tmp_range_drl", "tmp_seasonality", "isotherm"
-    )) %>%
-  group_by(snp_pos) %>%
-  slice_min(`Pr(>Chisq)`) %>%
-  group_by(covariate) %>%
-  reframe( N = n())
-```
-
-```{r temperature_hits, warning = FALSE}
-
-# initiate ggplot 
-ggplot(
-  data = lat_interest_chi_sq_sum, # using the summary data created above 
-  mapping = aes(
-    x = covariate, 
-    y = N,  # show the number of significant hits 
-    fill = covariate  # colour by the environmental data used 
-  )
-) + 
-  geom_col(
-    stat = "identity", 
-    show.legend = FALSE
-  ) + 
-  ggplot2::scale_fill_manual(
-    values = c(
-      isotherm = "orchid2", 
-      tmp_max = "black", 
-      tmp_min = "deepskyblue3", 
-      tmp_range_drl = "chartreuse3", 
-      tmp_range_yr = "chartreuse4", 
-      tmp_seasonality = "darkorchid4",
-      tmp_yr = "darkorange2", 
-      lat = "firebrick3"
-    )
-  ) +
-  ylab(
-    "Number of significant hits \n (maximum of 30)"
-  ) +
-  scale_y_continuous(
-    n.breaks = 10 
-  ) +
-  xlab( "" ) +
-  theme_minimal()
-
-# create second plot showing the strongest hits for each SNP
-ggplot(
-  data = lat_interest_chi_sq_min, 
-  mapping = aes(
-    x = covariate, 
-    y = N, 
-    fill = covariate
-  )
-) + 
-  geom_col(
-    stat = "identity", 
-    show.legend = FALSE
-  ) + 
-  ggplot2::scale_fill_manual(
-    values = c(
-      isotherm = "orchid2", 
-      tmp_max = "black", 
-      tmp_min = "deepskyblue3", 
-      tmp_range_drl = "chartreuse3", 
-      tmp_range_yr = "chartreuse4", 
-      tmp_seasonality = "darkorchid4",
-      tmp_yr = "darkorange2", 
-      lat = "firebrick3"
-    )
-  ) +
-  ylab(
-    "Count of Most-Significant Covariates"
-  ) +
-  scale_y_continuous(
-    n.breaks = 5 
-  ) +
-  xlab( "" ) +
-  theme_minimal()
-```
-
-## Overview of Results
-
-{Need to rewrite}
-
-These plots show that all covariates have at least one SNP for which they are
-significant, and 5 of the 7 covariates are significant in at least 6 of the 14
-SNPs.
-
-Isothermality is a significant predictor in 9/14 SNPs, and is the most
-significant hit in 7 of these (50% of SNPs). This is possibly explained by the
-fact that isothermality is a compound variable that takes the variation from
-both daily and yearly temperature ranges into account. As this test asks whether
-the remaining variance is better explained by the addition of the covariate, it
-stands to reason that a covariate that encompasses many other covariates will
-perform better (hence LAT also gives lots of hits).
-
-When isothermality is removed, average yearly temperature has the greatest
-number of most-significant hits, closely followed by seasonality and daily
-temperature range.
-
-## Overall conclusions:
-
--   these results suggest temperature variability is a stronger selective
-    pressure on mitochondrial DNA than the upper or lower limits.
-
--   overall mean temperature also has a significant role in terms of
-    mitochondrial evolution.
 
 # Investigating PRECIP_yr hits
 
@@ -742,51 +1262,6 @@ questions...
 
 ### Climate data
 
-Re-import full climate data:
-
-```{r climate_data_re_import}
-
-env_mean <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/lhf_country_mean_metadata_01_2024.feather"
-) 
-env_mean <- env_mean[, -c(12,17:23)]
-```
-
-Calculate areas for each country
-
-```{r add_country_area}
-
-world_coord <- geodata::world(
-  resolution = 3,  
-  # 1 = highest resolution, 5 = lowest resolution
-  level = 0, 
-  path = tempdir()
-)
-
-# generate a dataframe with country names: 
-world_coord_df <- as.data.frame(world_coord$NAME_0)
-
-# calculate the centroid coordinates: 
-country_area <- terra::expanse(
-  x = world_coord, 
-  unit = "km", 
-  transform = TRUE
-)
-
-# convert into a new table 
-country_area <- tibble(
-  area = country_area,  # containing numerical values for the sq km per country
-  country = world_coord$NAME_0 # the country 
-)
-
-# replace annoying names 
-country_area$country <- gsub(
-  pattern = "Czech Republic", 
-  replacement = "Czechia", 
-  x = country_area$country
-)
-```
-
 ### World Checklist of Vascular Plants
 
 Curated by Kew Gardens, this database provides taxonomy and distributions for
@@ -797,94 +1272,12 @@ Helpfully, it also has R package (rWCVP,
 <https://cran.r-project.org/web/packages/rWCVP/vignettes/rWCVP.html>) to help
 researchers use the data (happy days).
 
-```{r accessing_rWcVP}
-
-# install the package
-if (!require(rWCVPdata)) {
-  install.packages("rWCVPdata",
-    repos = c(
-      "https://matildabrown.github.io/drat",
-      "https://cloud.r-project.org"
-    )
-  )
-}
-
-if (!require(rWCVPdata)) { install.packages("rWCVP") }
-
-# install additional libraries
-library(rWCVPdata)
-library(rWCVP)
-```
-
 The WCVP uses locations from the World Geographic Scheme for Recording Plant
 Distributions (WGSRPD) at level 3. These refer to 'botanical countries'...
 apparently these "mostly" follow country boundaries, except for areas where
 large countries are split.
 
 To get a list of botanical countries for all the countries in our dataset:
-
-```{r WGSRPD_codes}
-
-# import table of country names and iso codes (for conversion)
-wgsrpd_lvl4 <- read.delim(
-  file = "~/Documents/data/lhf_d/tblLevel4.txt", 
-  sep = "*"
-)
-
-# generate a full list of countries in the climate data 
-country_list <- sort(unique(interest_gt_data$iso2))
-#iso2_list <- sort(unique(env_mean$ISO2))
-
-# create a single column table with ISO2 names 
-country_list <- tibble(
-  iso2 = country_list
-)
-
-# change annoying ISO2 codes (changed since the database was created)
-wgsrpd_lvl4$L4.ISOcode <- gsub(
-  pattern = "UK", 
-  replacement = "GB", 
-  x = wgsrpd_lvl4$L4.ISOcode 
-)
-wgsrpd_lvl4$L4.ISOcode <- gsub(
-  pattern = "SK", 
-  replacement = "CZ", 
-  x = wgsrpd_lvl4$L4.ISOcode 
-)
-
-# same here... 
-wgsrpd_lvl4$L4.ISOcode[wgsrpd_lvl4$L4.country == "Belarus"] <- "BY"
-wgsrpd_lvl4$L4.ISOcode[wgsrpd_lvl4$L4.country == "Namibia"] <- "NA"
-wgsrpd_lvl4$L4.ISOcode[wgsrpd_lvl4$L4.country == "Slovakia"] <- "SK"
-wgsrpd_lvl4$L4.ISOcode[wgsrpd_lvl4$L4.country == "Serbia"] <- "RS"
-
-wgsrpd_lvl4$L3.ISOcode[wgsrpd_lvl4$L4.country == "Serbia"] <- "SRB"
-
-# join the list of WGRSPD location data to the ISO2 codes in the data
-wgsrpd_list <- left_join(
-  x = country_list, 
-  y = wgsrpd_lvl4,
-  by = c("iso2" = "L4.ISOcode")
-)
-
-# select the ISO2 and plant dataset location identifiers
-wgsrpd_list <- wgsrpd_list %>%
-  select(iso2, L3.code) %>%
-  distinct()
-
-```
-
-```{r WGSRPD-summary-generation}
-
-# use defined functions to extract information for all countries in the climate data 
-lhf_wcvp_summary <- wcvp_summary(
-  taxon_rank = "species"#,
-  #area_codes = get_wgsrpd3_codes(unique(lat_interest_gt_data$country))
-)
-
-# extract summary data into a separate tibble
-lhf_wcvp_summary_tb <- lhf_wcvp_summary$Summary
-```
 
 This downloads data for all of the countries present in the LHF data. The
 columns are:
@@ -901,55 +1294,7 @@ columns are:
 
 > For the following analysis, only Native and Endemic species were considered.
 
-```{r WGSRPD_summary_format}
-
-# merge with the paired iso2 and plant location data
-lhf_wcvp_summary_tb <- left_join(
-  x = wgsrpd_list, 
-  y = lhf_wcvp_summary_tb, 
-  by = c("L3.code" = "area_code_l3")
-)
-
-# calculate mean values for each plant group
-lhf_wcvp_summary_tb <- lhf_wcvp_summary_tb %>%
-  group_by(iso2) %>%
-  reframe(
-    native = mean(Native),
-    native_sd = sd(Native),
-    endemic = mean(Endemic), 
-    extinct = mean(Extinct)
-  )
-
-```
-
-```{r WGSRPD_combine}
-
-# merge the plant metadata with the original covariates 
-interest_gt_data_meta <- left_join(
-  interest_gt_data[,c(3:19)], 
-  lhf_wcvp_summary_tb, 
-  by = c("iso2")
-) %>%
-  distinct()
-  
-# add in country area information
-interest_gt_data_meta <- left_join(
-  x = interest_gt_data_meta, 
-  y = country_area, 
-  by = "country"
-)
-
-# normalise the number of plant species by area 
-interest_gt_data_meta <- interest_gt_data_meta %>%
-  mutate(
-    native_area = (native / area), 
-    endemic_area = (endemic / area)
-  ) %>%
-  mutate(
-    native_area_rank = rank(native_area),
-    endemic_area_rank = rank(endemic_area)
-  ) 
-
+```         
 ```
 
 ### Disease data
@@ -971,59 +1316,13 @@ file contains:
 > different infectious diseases. A unique outbreak happens when a country has at
 > least one case of a specific disease during a given year."*
 
-```{r disease_data_import}
-
-# import .csv
-diseases <- read.csv(
-  file = "~/Documents/data/lhf_d/Outbreaks.csv" # downloaded manually from figshare page
-)
-
-# summarise by country
-diseases <- diseases %>%
-  group_by(iso3) %>%
-  reframe(
-    country = Country, 
-    iso2 = iso2, 
-    iso3 = iso3, 
-    outbreaks = n(), 
-  ) %>%
-  distinct()
-```
-
-```{r merge_data}
-
-# merge the metadata (inc. plants) with the disease summary
-interest_gt_data_meta <- left_join(
-  interest_gt_data_meta, 
-  diseases, 
-  by = "iso3"
-)
-
-interest_gt_data_meta <- interest_gt_data_meta %>%
-  mutate(
-    # normalise the number of outbreaks by area
-    outbreaks_area = (outbreaks / area) 
-  ) %>%
-  # convert the number of outbreaks to a rank value
-  mutate(
-  precip_rank = rank(precip_yr)
-    ) %>%
-  mutate(
-    outbreaks_area_rank = rank(outbreaks_area)
-  )
-
-
-```
-
-## Correlation Plots
-
 ```{r precip_yr_WGSRPD_compare}
 
 psych::pairs.panels(
-  x = interest_gt_data_meta[,c(16,31,17,18,19,20,24,25,26)], 
+  x = interest_gt_data_meta[,c(16,17,18,19,20,24)], 
   lm = TRUE, 
   stars = TRUE, 
-  hist.col = "deepskyblue3"
+  hist.col = "chartreuse4"
 )
 
 ```
@@ -1039,7 +1338,7 @@ species were observed.
 
 ```{r precip_yr_disease_compare}
 psych::pairs.panels(
-  x = interest_gt_data_meta[,c(16, 31, 17,29, 30, 32)], 
+  x = interest_gt_data_meta[,c(16, 17,29, 30)], 
   lm = TRUE, 
   stars = TRUE, 
   hist.col = "firebrick3"
@@ -1047,212 +1346,7 @@ psych::pairs.panels(
 
 ```
 
-## GLM analysis
 
-This section will use a similar approach to above and asks whether the model
-with the number of plant species or disease outbreaks better explains the
-distribution of data relative to the null model.
-
-### Combining datasets
-
-This section will focus on the SNPs that were detected in the initial (LAT +
-PRECIP_YR) analysis.
-
-```{r precip_interest_gt_data}
-
-# add suffix onto positions of interest
-precip_snps_col_names <- paste0(
-  "pos_", 
-   interest_snps_precip_yr # select sites that are noted of interest
-  ) # copy this into below...
-
-interest_snps_precip_yr <- sort(unique(interest_snps_precip_yr))
-
-# filter columns to only include interest SNPs
-precip_interest_gt_data <- interest_gt_data %>%
-  select(
-    c(
-      samples:patr_KC345983, # select metadata columns 
-      precip_snps_col_names
-      )
-    )
-
-# combine with disease and plant metadata 
-precip_interest_gt_data <- left_join(
-  x = precip_interest_gt_data, 
-  y = interest_gt_data_meta[, c(5, 18:26,29:32)], 
-  by = "iso3"
-)
-
-# reorder columns
-precip_interest_gt_data <- precip_interest_gt_data %>%
-  select(
-    c(
-      samples:patr_KC345983, 
-      native:outbreaks_area_rank, 
-      pos_156:pos_16351
-    ) 
-  )
-
-# Scale the values 
-col_to_scale <- c(20:27, 30,31)
-for (x in col_to_scale){
-  
-  col <- names(precip_interest_gt_data)[x]
-  
-  precip_interest_gt_data[[col]] <- scale(precip_interest_gt_data[[col]])
-}
-
-
-```
-
-```{r GLM_scorer_wgsrpd_disease}
-
-# define test formulas
-test_formulas <- c(
-  "~ patr_KC345983 + native_area + (1|iso2)", 
-  "~ patr_KC345983 + endemic_area + (1|iso2)",
-  "~ patr_KC345983 + outbreaks_area + (1|iso2)",
-  "~ patr_KC345983 + outbreaks_area_rank + (1|iso2)",
-  "~ patr_KC345983 + native_area_rank + (1|iso2)",
-  "~ patr_KC345983 + endemic_area_rank + (1|iso2)",
-  "~ patr_KC345983 + precip_yr + (1|iso2)"
-)
-
-# run the GLM scorer on the test formulas
-precip_interest_chi_sq <- GLM_chi_multi_scorer(
-  input = precip_interest_gt_data, 
-  test_formulas = test_formulas, 
-  start_col = 34
-)
-
-# bind the list items together
-precip_interest_chi_sq <- bind_rows(precip_interest_chi_sq)
-
-# convert SNPs value to numeric
-precip_interest_chi_sq$snp_pos <- as.numeric(precip_interest_chi_sq$snp_pos )
-
-# extract covariate names 
-precip_interest_chi_sq$covariate <- str_extract(
-  string = precip_interest_chi_sq$`test_formulas[i]`, 
-  pattern =  "outbreaks_area_rank|endemic_area_rank|native_area_rank|native_area|endemic_area|outbreaks_area|precip_yr"
-)
-
-# remove additional hits (see below)
-precip_interest_chi_sq <- precip_interest_chi_sq %>%
-  filter(snp_pos %in% interest_snps_precip_yr)
-
-# NA values are present for the null models 
-precip_interest_chi_sq$covariate[is.na(precip_interest_chi_sq$Chisq)] <- "null"
-
-# check that the only SNPs present are the interest ones (should match chunk above)
-sort(unique(precip_interest_chi_sq$snp_pos))
-```
-
-> Care has to be taken here to remove additional hits (selected by error) - this
-> arises when "pos_125" also matches to "pos_1252" (for example).
-
-### Plotting Results
-
-```{r precip_ggplots}
-
-ggplot(
-  data = filter(precip_interest_chi_sq, covariate != "null"), 
-  mapping = aes(
-    y = log10(`Pr(>Chisq)`), 
-    x = snp_pos, 
-    #colour = `test_formulas[i]`, 
-    #shape = `test_formulas[i]`
-  )
-  ) + 
-  geom_segment( # add bars in with mtDNA loci positions
-    data = mt_loci_pos,
-    ggplot2::aes(
-      x = aln_start, 
-      xend = aln_end,
-      y = - 7.5, 
-      yend = -7.5, 
-      col = classification
-    ),
-    size = 4, 
-    alpha = 0.6, 
-    position = ggplot2::position_jitter(
-      height = 0.5
-    )
-  ) +
-  geom_point( # add points for the pval for each covariate per SNP
-    mapping = aes(
-      colour = covariate,
-      shape = covariate
-    ), 
-    size = 4
-  ) +
-  ggplot2::scale_colour_manual( # add in colour values 
-    values = c( 
-      native_area = "orchid",
-      native_area_rank = "darkorchid",
-      endemic_area = "chartreuse3",
-      endemic_area_rank = "chartreuse4",
-      outbreaks_area = "darkorange2", 
-      outbreaks_area_rank = "firebrick3",
-      precip_yr = "deepskyblue4", 
-      mtDNA_palette
-    )
-  ) +
-  scale_shape_manual(
-    values = c(
-      15,0,17,2,19,1,8,4,25,8 # define shapes
-    )
-  ) +
-  ggplot2::geom_line(
-    y = -1*log10(0.05/(79*4)), 
-    colour = "black", 
-    linewidth = 1
-  ) + 
-  ggplot2::scale_x_continuous(
-    breaks = seq(0,17000, 1000)
-  ) +
-  ggplot2::ylim(c(0, -12)
-  ) +
-  ggplot2::ylab(
-    "Logged P-value"
-  ) +
-  ggplot2::theme(
-    legend.position = "right", 
-    axis.line = ggplot2::element_line(
-      linewidth = 1, 
-      colour = "black"
-    ), 
-    plot.background = ggplot2::element_rect(
-      fill = "snow"
-    ), 
-    panel.grid = ggplot2::element_line(
-      colour = "snow", 
-      linetype = "dotdash"
-    ),
-    panel.grid.major.x = ggplot2::element_line(
-      colour = "snow4", 
-      linetype = "dashed"
-    ), 
-    legend.background = ggplot2::element_rect(
-      fill = "snow"
-    )
-  ) +
-  theme_minimal()
-```
-
-This figure shows the Manhattan-style plots for the SNPs previously identified
-as being a significant hit for precipitation. \
-\
-This shows that there are a number of hits for both the number of outbreaks and
-the number of endemic and native species, however this is highly dependent upon
-the SNP in question. For some SNPs none of the additional outbreak or plant
-number variables result in a model that explains the distribution of genotypes
-significantly better than the null model (just patristic distances), even when
-PRECIP_YR remains a highly significant hit.
-
-For 3 sites (193, 3490, & 13172) PRECIP_YR is no longer a significant hit - this
-will be investigated/ discussed in more detail later.
 
 ```{r precip_deviances}
 
@@ -1483,92 +1577,6 @@ The subsequent plots show the deviance remaining for each of the models for each
 of the SNPs (one SNP per plot). Lower values indicate there is less variation
 remaining which is yet to be explained by the model.
 
-```{r precip_summary}
-n_snp_hits_precip <- length(unique(interest_snps_precip_yr))
-n_tests <- length(unique(test_formulas))
-
-# count the number of significant hits for each covariate
-precip_interest_chi_sq_sum <- precip_interest_chi_sq %>%
-  filter(`Pr(>Chisq)` <= (0.05/(n_snp_hits_precip*n_tests))) %>%
-  group_by(covariate) %>%
-  reframe( N = n())
-
-#head(precip_interest_chi_sq_sum)
-
-# plot the results
-ggplot(
-  data = precip_interest_chi_sq_sum, 
-  mapping = aes(
-    x = covariate, 
-    y = N, 
-    fill = covariate
-  )
-) + 
-  geom_col(
-    show.legend = FALSE
-  ) + 
-  ggplot2::scale_fill_manual(
-    values = c(
-      native_area = "orchid",
-      native_area_rank = "darkorchid",
-      endemic_area = "chartreuse3",
-      endemic_area_rank = "chartreuse4",
-      outbreaks_area = "darkorange2", 
-      outbreaks_area_rank = "firebrick3",
-      precip_yr = "deepskyblue4"
-    )
-  ) +
-  ylab(
-    "Number of significant hits \n (maximum of 18)"
-  ) +
-  scale_y_continuous(
-    n.breaks = 10 
-  ) +
-  xlab( "" ) +
-  theme_minimal()
-
-# create a table with the most significant covariates for each SNP
-precip_interest_chi_sq_sum <- precip_interest_chi_sq %>%
-  filter(`Pr(>Chisq)` <= (0.05/(n_snp_hits_precip*n_tests))) %>%
-  #filter(covariate != "precip_yr") %>%
-  group_by(snp_pos) %>%
-  slice_min(`Pr(>Chisq)`) %>%
-  group_by(covariate) %>%
-  reframe( N = n())
-
-# plot these results. 
-ggplot(
-  data = precip_interest_chi_sq_sum, 
-  mapping = aes(
-    x = covariate, 
-    y = N, 
-    fill = covariate
-  )
-) + 
-  geom_col(
-    show.legend = FALSE
-  ) + 
-  ggplot2::scale_fill_manual(
-    values = c(
-      native_area = "orchid",
-      native_area_rank = "darkorchid",
-      endemic_area = "chartreuse3",
-      endemic_area_rank = "chartreuse4",
-      outbreaks_area = "darkorange2", 
-      outbreaks_area_rank = "firebrick3",
-      precip_yr = "deepskyblue4"
-    )
-  ) +
-  ylab(
-    "Count of Most-Significant Covariates"
-  ) +
-  scale_y_continuous(
-    n.breaks = 5 
-  ) +
-  xlab( "" ) +
-  theme_minimal()
-```
-
 These plots show the number of times a model with a particular covariate
 performs significantly better than the null model (just patristic distance). As
 expected PRECIP_YR is significant for the majority of the SNPs - although the
@@ -1630,7 +1638,7 @@ variables approach the threshold for significance. The conclusion from this
 could be that neither diet nor disease is acting as a significant selective
 pressure on these sites.
 
-#### Significant hits 
+#### Significant hits
 
 ```{r precip_hits_table}
 precip_interest_chi_sq_sum <- precip_interest_chi_sq %>%
@@ -1802,7 +1810,7 @@ Notably there for "problem" SNPs 3490 and 13172 the models with both covariates
 are identifiable as being more significant than each of the single-term models -
 this supports the findings of the precipitation-specific analysis.
 
-### Directly testing the significance of interactions. 
+### Directly testing the significance of interactions.
 
 The above plot shows visually whether there is a difference between the models
 with and without an interaction term, but does not state whether this difference
@@ -1853,9 +1861,9 @@ ggplot(
   geom_point(
     stat = "identity", 
     position = position_dodge(0.2)
-  )+
+  ) +
   ggplot2::geom_point(
-    y = -1*log10(0.05/(79*4)), 
+    y = -1*log10(0.05/(19*4)), 
     colour = "black",
     shape = 45,
     size = 5
@@ -1939,6 +1947,11 @@ interact_interest_chi_combo$log_interact_pval[interact_interest_chi_combo$log_in
    (0.05/48*2)
   )] <- NA  # remove the labels for any poitions that do not pass the threshold
 
+interact_interest_chi_combo <- left_join(
+  x = interact_interest_chi_combo, 
+  y = rCRS, 
+  by = join_by("snp_pos" == "aln_pos")
+)
 ```
 
 ```{r plot_interact_chi_combo}
@@ -1947,7 +1960,7 @@ ggplot(
   data = interact_interest_chi_combo, 
   mapping = aes(
     y = log10(`Pr(>Chisq).x`), 
-    x = as.factor(snp_pos), 
+    x = as.factor(rCRS_pos), 
     #colour = `test_formulas[i]`, 
     #shape = `test_formulas[i]`
   )
@@ -1961,10 +1974,10 @@ ggplot(
   ) +
   ggplot2::scale_colour_manual(
     values = c( 
-      `lat * precip_yr` = "black",
+      `lat * precip_yr` = "grey20",
       `lat + precip_yr` = "wheat4",
       lat = "firebrick3",
-      precip_yr = "deepskyblue4", 
+      precip_yr = "deepskyblue3", 
       mtDNA_palette
     )
   ) +
@@ -1987,29 +2000,6 @@ ggplot(
   ggplot2::xlab(
     "SNP position"
   ) +
-  ggplot2::theme(
-    legend.position = "right", 
-    axis.line = ggplot2::element_line(
-      linewidth = 1, 
-      colour = "black"
-    ), 
-    plot.background = ggplot2::element_rect(
-      fill = "snow"
-    ), 
-    panel.grid = ggplot2::element_line(
-      colour = "snow", 
-      linetype = "dotdash"
-    ),
-    panel.grid.major.x = ggplot2::element_line(
-      colour = "snow4", 
-      linetype = "dashed"
-    ), 
-    legend.background = ggplot2::element_rect(
-      fill = "snow"
-    )
-  ) +
-  theme_minimal(
-  ) + 
   ggplot2::geom_text(
     mapping = ggplot2::aes(
       label = log_interact_pval, 
@@ -2018,8 +2008,46 @@ ggplot(
     size = 4,
     nudge_x = 0, 
     nudge_y = 5, 
-    na.rm = TRUE, 
-    show.legend = "top"
+    na.rm = TRUE
+  ) +
+  theme_minimal(
+  ) + 
+  ggplot2::theme(
+    legend.position = "bottom", 
+    axis.line = ggplot2::element_line(
+      linewidth = 1, 
+      colour = "black"
+    ), 
+    plot.background = ggplot2::element_rect(
+      fill = "white"
+    ), 
+    panel.grid = ggplot2::element_line(
+      colour = "white", 
+      linetype = "dotdash"
+    ),
+    panel.grid.major.x = ggplot2::element_line(
+      colour = "snow3", 
+      linetype = "dashed"
+    ), 
+    legend.background = ggplot2::element_rect(
+      fill = "white"
+    ), 
+    axis.text.x = element_text(
+      angle = 90,
+      vjust = 0.5,
+      hjust = 0.5,
+      size = 10
+    )
+  ) 
+  ggplot2::geom_text(
+    mapping = ggplot2::aes(
+      label = log_interact_pval, 
+      colour = classification
+    ), 
+    size = 4,
+    nudge_x = 0, 
+    nudge_y = 5, 
+    na.rm = TRUE
   )
 
 ```
@@ -2032,11 +2060,13 @@ ggplot(
     x = interest, 
     y = log10(`Pr(>Chisq).y`), 
     colour = interest, 
-    fill = interest
+    fill = interest, 
+    shape = interest
   )
 ) + 
   geom_point(
-    position = position_dodge2(0.25)
+    position = position_dodge2(0.25),
+    size = 5
   ) +
   geom_boxplot(
     alpha = 0.75, 
@@ -2055,6 +2085,16 @@ ggplot(
       precip_yr = "deepskyblue4", 
       both = "grey20"
     )
+  ) +
+  scale_shape_manual(
+    values = c(15,17,19)
+  ) + 
+  geom_point(
+    y = log10(0.05/(19*2)),
+    colour = "black", 
+    shape = 45,
+    size = 5,
+    show.legend = FALSE
   ) +
   ylab(
     "log10 p-value"
@@ -2079,5 +2119,194 @@ interact_pval_aov <- aov(
 TukeyHSD(
   x = interact_pval_aov
 )
+
+```
+
+## Connecting to phased SNPs
+
+```{r}
+interest_snps_phased <- left_join(
+  x = interest_snps, 
+  y = rCRS, 
+  by = join_by(pos == aln_pos)
+)
+
+interest_snps_phased <- interest_snps_phased[
+  ,
+  c(1,ncol(interest_snps_phased), 3:(ncol(interest_snps_phased)-1))
+  ]
+
+```
+
+## Plotting allele frequencies
+
+```{r import_allele_freq}
+
+allele_freq <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/lhf_country_allele_freq_maf0.005.feather"
+)
+
+allele_freq$pos <- as.numeric(allele_freq$pos)
+
+allele_freq <- left_join(
+  x = allele_freq, 
+  y = rCRS, 
+  by = join_by(pos == aln_pos)
+)
+
+```
+
+```{r plot_focal_AF}
+focal_snps <- c(2706,10238,152, 8701,10398,10034,15924, 15218)
+focal_snps <- sort(focal_snps)
+
+for (i in focal_snps){
+  print(i)
+  
+  allele_freq_select <- allele_freq %>%
+    filter(rCRS_pos == i)
+  
+  p <- ggplot(
+  data = allele_freq_select, 
+  mapping = ggplot2::aes(
+    x =  reorder(x = ISO2, +a2_freq), # plot the bars in value order
+    y = a2_freq, # value to plot
+    colour = continent
+  )
+) + 
+  ggplot2::geom_point(
+    #stat = "identity"
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c(
+      "deepskyblue4", "firebrick4", "darkorchid3", "chartreuse4", "turquoise",
+  "chartreuse3"
+    )
+  ) +
+  ggplot2::theme(
+     axis.text.x = ggplot2::element_text(
+       angle = 90,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 3
+       )
+  ) + 
+    ggtitle(
+      paste0(
+       "Position: ",
+        unique(allele_freq_select$rCRS_pos)
+      )
+  ) +
+  xlab("Country"
+  ) + 
+  ylab(
+  "Allele Frequency"
+  )
+  
+  print(p)
+  
+}
+
+
+allele_freq_focal <- allele_freq %>%
+  filter(
+    rCRS_pos %in% focal_snps
+  )
+
+ggplot2::ggplot(
+  data = allele_freq_focal, 
+  mapping = ggplot2::aes(
+    x =  reorder(x = ISO2, +a2_freq), # plot the bars in value order
+    y = a2_freq, # value to plot
+    colour = continent
+  )
+) + 
+  ggplot2::geom_point(
+    #stat = "identity"
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c(
+      "deepskyblue4", "firebrick4", "darkorchid3", "chartreuse4", "turquoise",
+  "chartreuse3"
+    )
+  ) +
+  ggplot2::theme(
+     axis.text.x = ggplot2::element_text(
+       angle = 90,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 5
+       )
+) +
+#ggplot2::ylim(c(
+#    min(allele_freq_select$a1_freq)-0.05, 1 # set the axis to be more precise
+#  )
+#) + 
+#  paste0(
+#    "Position: ",
+#    unique(allele_freq_select$pos)
+#  )
+#) +
+ggplot2::xlab("Country"
+) + 
+ggplot2::ylab(
+  "Allele Frequency"
+) +
+  facet_wrap(
+    ~(rCRS_pos)
+  )
+```
+
+```{r}
+focal_snps <- unique(precip_interest_chi_sq$rCRS_pos)
+focal_snps <- sort(focal_snps)
+
+
+for (i in focal_snps){
+  print(i)
+  
+  allele_freq_select <- allele_freq %>%
+    filter(rCRS_pos == i)
+  
+  p <- ggplot(
+  data = allele_freq_select, 
+  mapping = ggplot2::aes(
+    x =  lat, # plot the bars in value order
+    y = a2_freq, # value to plot
+    colour = continent
+  )
+) + 
+  ggplot2::geom_point(
+    #stat = "identity"
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c(
+      "deepskyblue4", "firebrick4", "darkorchid3", "chartreuse4", "turquoise",
+  "chartreuse3"
+    )
+  ) +
+  ggplot2::theme(
+     axis.text.x = ggplot2::element_text(
+       angle = 90,
+       vjust = 0.5,
+       hjust = 0.5,
+       size = 3
+       )
+  ) + 
+    ggtitle(
+      paste0(
+       "Position: ",
+        unique(allele_freq_select$rCRS_pos)
+      )
+  ) +
+  xlab("Country"
+  ) + 
+  ylab(
+  "Allele Frequency"
+  )
+  
+  print(p)
+  
+}
 
 ```
