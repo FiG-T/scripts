@@ -319,6 +319,56 @@ complied. Please note that this was written based on the personal file system
 structure that I use and may therefore be temperamental is your system does not
 match this. For this reason I have also include a breakdown of the code above.
 
+### File system structure 
+
+Two types of files are required for this function to work.
+
+1.  **A folder (or folders) containing the raw activity files.**
+
+    These folder names should all have the same stem + bloc/timepoint number (if
+    using). All the raw data files should be in the standard DAMS output format
+    (e.g. Monitor1.txt)
+
+2.  **A metadata file with the biological information for each monitor in each
+    folder.**
+
+#### Metdata file format
+
+The metadata file should be an excel file with information on:
+
+-   the monitor number
+
+-   the bloc
+
+-   the date o*f the start* of the experiment (i.e: when they were added to the
+    chambers) - this is used to automatically calculate the burnin time.
+
+-   the genotype
+
+-   the population (or other unique identifier)
+
+E.g.:
+
+| monitor | bloc | date       | genotype | pop |
+|---------|------|------------|----------|-----|
+| 1       | 1    | 01.01.2024 | A        | 1   |
+| 1       | 2    | 10.10.2024 | B        | 3   |
+
+: Example metadata table
+
+In this instance the folder names containing the raw data must end with 1 and 2
+(for bloc 1 and 2 respectively).
+
+E.g:
+
+Within the directory: *\~/files/data/project/activity* You should have...
+
+*DAMS_Bloc1* ( a folder containing *Monitor1.txt*)
+
+*DAMS_Bloc2* (a folder containing *Monitor1.txt)*
+
+activity_metadata.xlsx (the example table written out above)
+
 ```{r import_DAMs}
 
 import_DAMs <- function(
@@ -586,11 +636,11 @@ import_DAMs <- function(
 dams_table <- ""
 
 dams_table <- import_DAMs(
-  path = "~/OneDrive - University College London/data/time_fitness/activity",
-  directory_pattern = "DAMS_b.*",
-  meta_pattern = ".*meta.*",
-  meta_date_col = 3,  
-  bloc_name = "DAMS_b", 
+  path = "~/OneDrive - University College London/data/time_fitness/activity", # the path to the general directory
+  directory_pattern = "DAMS_b.*", # the pattern that matches the folders with raw data 
+  meta_pattern = ".*meta.*", # the regex to find your metadata file
+  meta_date_col = 3,  # the column containing the date information 
+  bloc_name = "DAMS_b",  # the link between your folder names and bloc timepoints... e.g. In the above example the blocs are 1 and 2 but the folders are DAMS_Bloc1 and DAMS_Bloc2. The connector is therefore "DAMS_Bloc"
   numeric_bloc = TRUE
 )
 
