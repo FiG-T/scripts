@@ -115,7 +115,7 @@ pop_fitness_no1 <- pop_fitness %>%
   filter(timepoint != 1)
 ```
 
-## Creating general plots 
+## Creating general plots
 
 ```{r pairwise_plots}
 #names(pop_fitness)
@@ -214,7 +214,7 @@ for (i in seq_along(plot_list)){
 
 ```
 
-## PCA analysis 
+## PCA analysis
 
 ```{r pca_values}
 fitness_pca <- ""

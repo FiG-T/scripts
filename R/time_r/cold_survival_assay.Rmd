@@ -46,7 +46,7 @@ TIME_theme <- theme_light(
   )
 ```
 
-# Introduction 
+# Introduction
 
 As part of the experimental evolution study looking at mitonuclear
 incompatibilities (T.I.M.E) we assess the "fitness" of individuals from
@@ -325,7 +325,7 @@ ggplot(
 
 ```
 
-## Normalising by mM 
+## Normalising by mM
 
 As there is variability in the parental lines (unexpected, but likely due to the
 effects of living in the cages) an internal control can be used to compare

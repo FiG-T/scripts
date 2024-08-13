@@ -4,8 +4,8 @@ author: "FiG-T"
 date: "`r Sys.Date()`"
 output: 
   html_document: 
-    keep_md: yes
     toc: yes
+    keep_md: yes
 toc: TRUE
 editor_options:
   markdown:
@@ -319,7 +319,7 @@ complied. Please note that this was written based on the personal file system
 structure that I use and may therefore be temperamental is your system does not
 match this. For this reason I have also include a breakdown of the code above.
 
-### File system structure 
+### File system structure
 
 Two types of files are required for this function to work.
 
@@ -649,3 +649,4 @@ openxlsx::write.xlsx(
   file = "~/OneDrive - University College London/data/time_fitness/activity/time_activity_data.xlsx"
 )
 ```
+

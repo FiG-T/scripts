@@ -59,7 +59,7 @@ Drosophila Activity Monitors (a.k.a DAMs) (TriKinetics) are a valuable tool for 
 
 If the data is still in the raw data (MonitorX.txt) format, please see 'import_DAMS.Rmd' for details on how to convert this to a usable structure.
 
-## Importing Data 
+## Importing Data
 
 ```{r import_data}
 
@@ -69,7 +69,7 @@ dams_table <- readxl::read_excel(
 )
 ```
 
-## Formatting data 
+## Formatting data
 
 So that the downstream analysis and plotting will work correctly the data must be formatted.
 
@@ -335,7 +335,7 @@ day2_activity_gt_roll <- day2_activity_rollmean %>%
 
 ## Plotting activity
 
-### Population Plots 
+### Population Plots
 
 ```{r monitor_plots, include=FALSE}
 
@@ -742,7 +742,7 @@ ggplot2::ggplot(
 
 ```
 
-## Grouping Day & Night 
+## Grouping Day & Night
 
 As a single metric is often easier to interpret than a full activity plot...
 
