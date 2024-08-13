@@ -122,12 +122,12 @@ ggplot2::ggplot(
   ) +
   ggplot2::xlab("")+
   ggplot2::ylab("") +
-  #ggplot2::scale_colour_manual(
+  ggplot2::scale_colour_manual(
   values = c( #"snow4",
     "darkorange2","orchid", "darkorchid", "darkorchid4","firebrick3", 
     "deepskyblue4", "snow3", "snow4", "chartreuse3", "chartreuse4"
-  )
-) + 
+   )
+  )+ 
   ggplot2::coord_polar(
   ) + 
   theme(
