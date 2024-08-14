@@ -17,7 +17,7 @@ editor_options:
 knitr::opts_chunk$set(echo = FALSE)
 ```
 
-# Tree Branch 
+# Tree Branch
 
 This branch of analysis is focused on generating the patristic distances (via a
 phylogenetic tree).
@@ -67,7 +67,7 @@ The resulting tree includes all individuals present in the filtered alignment
 however not all countries have enough individuals to be representative (hence
 some individuals will be filtered out downstream).
 
-## Midpoint rooting 
+## Midpoint rooting
 
 As no specific outgroup is provided in the alignment there is no obvious
 candidate to root the resulting tree. To get around this issue, midpoint rooting
@@ -125,7 +125,7 @@ FastTree_full_rooted <- ape::read.tree(
 
 ```
 
-### Choosing a "base individual". 
+### Choosing a "base individual".
 
 To get a single value for the patristic distances it is necessary to select a
 single individual to act as the point of reference. It is not exactly clear to
@@ -178,7 +178,7 @@ feather::write_feather(
 
 ```
 
-# Genotype Data Branch 
+# Genotype Data Branch
 
 This section outlines how to go from the alignment to the genotype matrix used
 in the GLM analysis.
@@ -188,7 +188,7 @@ in the GLM analysis.
 alignment file -\> vcf file -\> filtered vcf -\> genotype matrix -\> genotype
 table
 
-## Converting to VCF 
+## Converting to VCF
 
 Converting from a FASTA alignment to a VCF was surprisingly difficult - the end
 result was to use the `snp-sites` bioconductor package and run this on Anaconda
@@ -212,7 +212,7 @@ conda env list
 `snp-sites -v -o snp_sites_msa_converted_09_2023.vcf aln_mafft_incRef_filtered_3_09_2023.fasta`
 ```
 
-## Filtering the VCF 
+## Filtering the VCF
 
 The resulting VCF will include any site that is variable, regardless of the
 frequency of the minor allele. Many of these are likely to be caused by mapping
@@ -250,7 +250,7 @@ vcftools --vcf snp_sites_filtered_vcf_noRef_092023.recode.vcf --maf 0.005 --reco
 > **This results in a VCF file with 442 sites (of an original 7254) and 23,790
 > individuals. This is the file that will be used going forwards.**
 
-## Collecting sample names 
+## Collecting sample names
 
 During the course of the alignment and VCF filtering certain individuals will
 have been removed from the analysis. For later steps, it's important that the
@@ -268,7 +268,7 @@ bcftools query -l snp_sites_filtered_vcf_maf0.005_noRef_092023.recode.vcf > lhf_
 
 ```
 
-## Extracting Genotype Matrices 
+## Extracting Genotype Matrices
 
 The Generalised Linear Models require a the genetic information to be stored as
 a list of genotypes (1 or 0 for each SNP). This can be extracted from the
@@ -317,7 +317,72 @@ feather::write_feather(
 
 ```
 
-# Metadata Branch 
+## Creating a genlight object
+
+```{r create_genlight, echo=TRUE}
+
+# this can be done using the vcfR package:
+lhf_gl <- vcfR::vcfR2genlight(
+  x = lhf_vcf
+) # this will omit any non-biallelic sites
+```
+
+## Generating PCA scores
+
+```{r PCA_scores, echo = FALSE, include = FALSE}
+
+lhf_pca <- adegenet::glPca(
+  #x = vcf.gl,  # FAILSAFE-remove initial hashtag
+  nf = 4,          # how many PCs to retain
+  parallel = TRUE, # unless specified otherwise, the max number of available cores will be used. 
+)
+
+```
+
+```{r save_pca_scores}
+# convert to a tibble
+lhf_pca_scores <- tidyr::as_tibble(lhf_pca$scores)
+lhf_pca_eig <- tidyr::as_tibble(lhf_pca$eig)
+lhf_pca_loadings <- tidyr::as_tibble(lhf_pca$loadings)
+
+lhf_pca_list <- list(lhf_pca_scores, lhf_pca_eig, lhf_pca_loadings)
+
+# as the pca takes a long time to run ... save these scores... 
+feather::write_feather(
+  x = lhf_pca_scores, 
+  path = "~/Documents/data/lhf_d/feather/lhf_pca_scores_0.005_03_2024.feather"
+)
+feather::write_feather(
+  x = lhf_pca_eig, 
+  path = "~/Documents/data/lhf_d/feather/lhf_pca_eig_0.005_03_2024.feather"
+)
+feather::write_feather(
+  x = lhf_pca_loadings, 
+  path = "~/Documents/data/lhf_d/feather/lhf_pca_loadings_0.005_03_2024.feather"
+)
+```
+
+To calculate the percentage of variance explained by each PC.
+
+```{r pca_variance}
+# calculate the sum of all eigenvalues
+ eig.total <- sum(lhf_pca$eig)
+
+pca_var <- c()
+for (i in 1:4){
+  
+  pca_var[i] = formatC(
+      head(lhf_pca$eig)[i]/eig.total * 100
+    )
+  
+ # where i is the number of the PC you wish to show...
+}
+
+# "19.09" "11.77" "7.153" "5.766"
+
+```
+
+# Metadata Branch
 
 This branch is focused on compiling together the metadata used for the initial
 analysis (i.e. just WorldClim variables).
