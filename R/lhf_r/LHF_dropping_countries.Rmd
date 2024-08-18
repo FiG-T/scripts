@@ -1,0 +1,466 @@
+---
+title: "LHF Dropping Countries"
+author: "FiG-T"
+data: "`r Sys.Date()`"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+toc: TRUE
+editor_options:
+  markdown:
+    wrap: 80
+  chunk_output_type: inline 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The number of mtDNA sequences available are not uniform across all countries.
+Four countries in particular (ESP, RUS, GBR & USA) have excess of 1000
+individuals. To ensure that these countries are not leading to spurious results
+in the environmental association models they have been downsampled in the main
+method (see LHF_core_GLMs.RMd). An alternative approach is to run the models on
+the full dataset, repeat while sequentially removing over-represented countries,
+then assess the stability of the results.
+
+To reduce computational demand, the core GLMs will only be run for the SNPs that
+were hits for lat or precip in the full dataset. This is as we are asking here
+if the results found are stable - not whether we can find any other hits (which
+may be interesting but are a slightly different avenue to explore).
+
+# Data
+
+This approach requires broadly the same data as the down-sampling method.
+
+# Function 
+
+```{r drop_GLM_scorer}
+
+# This function is designed to run the analysis on multiple subsets of the data
+
+drop_GLM_scorer <- function(
+        input, 
+        drop_countries, 
+        start_col = 24, 
+        test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
+        null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)",  
+        num_cores = 1,
+        cutoff_quantile = 0.05,   # which values to include labels for 
+        overdisp_limits = c(0.8, 200), # the upper and lower bounds for overdispertion ratios
+        alpha = 0.01
+) {
+  
+  drop_hits <- list() # initiate empty list
+  
+  for (i in seq_along(drop_countries)) { # for each country/countries to drop
+    
+    message(
+      paste0(
+        "Dropping:   ", drop_countries[i]
+      )
+    )
+    
+    table <- input %>%
+      filter(!str_detect( # detect if the country or countries are present 
+        iso3,
+        drop_countries[i]
+      ) )  # only select countries that dont fit this criteria
+    
+    message(
+      paste0(
+        length(unique(table$iso3)), 
+        " Countries left after filter"
+      )
+    )
+    
+    # run the GLM scorer on each data 
+    drop_glm_scores <- 
+      core_GLM_scorer_parallel(
+        input = table, 
+        start_col = start_col, 
+        test_formula = test_formula, 
+        null_formula = null_formula, 
+        num_cores = num_cores
+      )
+    
+    print(
+      head(drop_glm_scores)
+    )
+    
+    drop_glm_scores_filter <- core_GLM_formatter(
+      input = drop_glm_scores, 
+      cutoff_quantile = cutoff_quantile,   # which values to include labels for 
+      overdisp_limits = overdisp_limits, 
+      alpha = alpha
+    )
+    
+    iso3 <- drop_countries[i]
+    
+    drop_hits[[iso3]] <- drop_glm_scores_filter
+    
+    message(
+      paste0(
+        iso3, " successfully dropped"
+      )
+    )
+  }
+  
+  return(drop_hits)
+  
+}
+```
+
+# Methods
+
+```{r lhf_gt_meta_pc_hits}
+
+# convert SNP values to match column names
+pos_hits <- str_c(
+  "pos_", unique(core_GLM_hits$snp_pos), 
+  sep = ""
+)
+
+# select the columns that match the metadata and SNP hits 
+lhf_gt_meta_pc_hits <- lhf_gt_meta_pc %>%
+  select(
+    acc:precip_seasonality,
+    all_of(
+      pos_hits
+    )#, 
+   # pos_3060, pos_3557, pos_3970
+  )
+
+names(lhf_gt_meta_pc_hits)
+
+feather::write_feather(
+  x = lhf_gt_meta_pc_hits, 
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_hits_05_2024.feather" # date changed
+)
+
+```
+
+```{r dropping_countries_GLMs}
+countries_to_drop <- c(
+  #"RUS|GBR|ESP|USA"#, 
+  #"RUS", 
+  #"GBR"#, 
+  "USA"
+)
+system.time(
+drop_hits_es <- drop_GLM_scorer(
+  input = lhf_gt_meta_pc_hits, 
+  start_col = 25,
+  drop_countries = "ESP",
+  num_cores = 6
+)
+)
+drop_hits_us <- drop_hits_ru.gb.us
+
+drop_hits_gb <- drop_GLM_scorer(
+  input = lhf_gt_meta_pc_hits, 
+  drop_countries = "GBR",
+  start_col = 25,
+  num_cores = 6
+)
+```
+
+```{r combine_drop_hits}
+# save early 
+
+# add in ESP data 
+drop_hits_full <- c(drop_hits, drop_hits_ru, drop_hits_us, drop_hits_gb, drop_hits_es)
+
+# add in table without any dropped countries 
+drop_hits_full[["ds"]] <- core_GLM_scores_formatted
+  
+
+drop_hits <- drop_hits_full
+```
+
+```{r extract_sig_hits}
+
+# add in full dataset
+#drop_hits[["all"]] <- core_GLM_scores_formatted
+
+# initiate an empty list
+glm_snps_list <- list() 
+
+# for all the tables in the list 
+for (i in seq_along(drop_hits)) {
+  
+  table <- drop_hits[[i]]
+  
+  bon_threshold_table <- 0.05/(length(unique(table$snp_pos)))
+  
+  print(bon_threshold_table)
+  
+  table <- table %>%
+   dplyr::filter(`Pr(Chi)` < bon_threshold_table)
+  
+  x_lat <- paste0(
+    names(drop_hits)[i], 
+    "_lat"
+  )
+  x_lat_pval <- paste0(
+    names(drop_hits)[i], 
+    "_lat_pval"
+  )
+  
+  x_precip_yr <- paste0(
+    names(drop_hits)[i], 
+    "_precip_yr"
+  )
+  x_precip_yr_pval <- paste0(
+    names(drop_hits)[i], 
+    "_precip_yr_pval"
+  )
+  
+  vect_lat <-  c(table$snp_pos[table$covariate == 'lat'])
+  vect_lat_pval <-  c(table$`Pr(Chi)`[table$covariate == 'lat'])
+  vect_precip <-  c(table$snp_pos[table$covariate == 'precip_yr'])
+  vect_precip_pval <-  c(table$`Pr(Chi)`[table$covariate == 'precip_yr'])
+  
+  glm_snps_list[[x_lat]] <- vect_lat
+  glm_snps_list[[x_lat_pval]] <- vect_lat_pval
+  glm_snps_list[[x_precip_yr]] <- vect_precip
+  glm_snps_list[[x_precip_yr_pval]] <- vect_precip_pval
+  
+}
+
+```
+
+```{r merging_lists, warnings = FALSE}
+
+# find max length (i.e. max number of significant SNPs)
+max_len <- max(
+  sapply(
+    glm_snps_list, 
+    length
+  ) 
+)
+
+# loop through all vectors in the list 
+ for(i in seq_along(glm_snps_list)){
+  
+  length(glm_snps_list[[i]]) <- max_len # assign them all the same length
+  
+  glm_snps_list[[i]] <- gsub(
+    pattern = "pos_",  # replace preffixes
+    replacement = "", 
+    x = glm_snps_list[[i]] 
+  )
+  
+  #names(list_snps)[i] <- list_snps_names[i] # assign names
+}
+
+# bind columns together
+glm_snps <- dplyr::bind_cols(glm_snps_list)
+
+feather::write_feather(
+  x = glm_snps, 
+  path = "~/Documents/data/lhf_d/feather/glm_snps_05_2024.feather"
+)
+
+ncol(glm_snps)
+
+# create tibble column of all detected SNPs
+overlap_snps <- purrr::list_c(
+    x = glm_snps_list[c(1,3,5,7,9,11,13,15,17,19,21,23,25,27)]
+    #x = list_snps,
+  ) %>%
+  unique() %>%          # keep unique values
+  na.omit() %>%         # remove NAs
+  as.numeric() %>%      #convert from chr to numeric
+  base::sort(
+    decreasing = FALSE  # sort order
+  ) 
+# convert to tibble
+overlap_snps <- tidyr::tibble(
+  pos = overlap_snps
+)
+
+
+# add in grid (presence/absence) for each test 
+for (i in c(1,3,5,7,9,11,13,15,17,19,21,23,25,27)) {
+#  
+  glm_snps[[names(glm_snps)[i]]] <- as.numeric(glm_snps[[names(glm_snps)[i]]])
+#  
+  overlap_snps[[names(glm_snps)[i]]][
+    overlap_snps$pos %in% c( # if the SNP is in the list of SNPs for a test
+      glm_snps[[
+        names(glm_snps)[i]
+      ]]
+    )
+  ] <- 1     # ... then set the values in that grid to 1
+
+}
+
+# add in sig pvals
+#for (i in c(1,3,5,7,9,11,13,15)){ #,17,19,21,23)){
+  
+  #x <- 2
+  
+#  glm_snps[[i]] <- as.numeric(glm_snps[[i]])
+  
+#  table <- glm_snps[, c(i, i+1)]
+  
+#  overlap_snps <- dplyr::full_join(
+#    x = overlap_snps,
+#    y = table, 
+#    by =c(
+#      "pos" = names(glm_snps)[i]
+#    )
+#  )
+#  
+#  overlap_snps <- overlap_snps %>%
+#    filter(!is.na(pos))
+#  
+#  #x <- x+1
+#  
+#}
+```
+
+```{r format_overlap_snps}
+for (i in c(1,3,5,7,9,11,13,15,17,19,21,23,25,27)) {
+  col <- names(glm_snps)[i]
+  
+  overlap_snps <- dplyr::left_join(
+  overlap_snps, 
+  glm_snps[,c(i,i+1)], 
+  by = setNames(col, "pos")
+)
+  
+}
+
+```
+
+```{r overlap_tibble_filtering}
+
+for ( i in seq_along(overlap_snps)){
+  overlap_snps[[names(overlap_snps[i])]] <- as.numeric(
+    overlap_snps[[names(overlap_snps[i])]])
+}
+# change NAs to 0
+#overlap_snps[is.na(overlap_snps)] <- 0
+
+#str(overlap_snps)
+
+# add in column for total 
+overlap_snps <- overlap_snps %>%
+  rowwise() %>%
+  mutate(
+    total_lat_glm = sum(
+      dplyr::c_across(
+        matches("_lat$")
+      ), 
+      na.rm = TRUE
+    )
+  ) %>%
+  mutate(
+    total_precip_glm= sum(
+      dplyr::c_across(
+        matches("_precip_yr$")
+      ), 
+      na.rm = TRUE
+    )
+  )
+```
+
+```{r curate_overlap_snps_l}
+
+# converting to long format 
+overlap_snps_l <- tidyr::pivot_longer(
+  data = overlap_snps, 
+  cols = matches(
+    "lat$|precip_yr$"
+  ), 
+  names_to = "test", 
+  values_to = "hit"
+)
+
+overlap_snps_l <- select(
+  overlap_snps_l, 
+  -matches("pval$") # remove columns with pvalues
+)
+
+overlap_snps_l2 <- tidyr::pivot_longer(
+  data = overlap_snps, 
+  cols = matches(
+    "pval$"
+  ), 
+  names_to = "test", 
+  values_to = "pval"
+)
+
+overlap_snps_l2$test <- gsub(
+  pattern = "_pval", 
+  replacement = "", 
+  x = overlap_snps_l2$test
+)
+
+# join together 
+overlap_snps_l <- full_join(
+  x = overlap_snps_l, 
+  y = overlap_snps_l2[,c("pos", "test", "pval")], 
+  by = c("pos", "test")
+)
+
+overlap_snps_l$pval <- as.numeric(overlap_snps_l$pval)
+
+overlap_snps_l <- overlap_snps_l %>%
+  mutate(
+    across(
+      pval, 
+      signif, 4
+    )
+  )
+
+overlap_snps_l$pval[is.na(overlap_snps_l$pval)] <- 1
+```
+
+```{r merge_mt_loci_overlap}
+
+# merge with loci data 
+overlap_snps_l <- dplyr::left_join(
+  x = overlap_snps_l, 
+  y = mt_loci_pos, 
+  by = join_by(pos >= aln_start, pos <= aln_end)
+)
+
+# separate out test column 
+overlap_snps_l <- separate(
+  data = overlap_snps_l, 
+  col = test, 
+  into = c("test", "covariate"), 
+  sep = "_"
+)
+
+```
+
+```{r save_overlap_snps}
+overlap_snps_l <- left_join(
+  x = overlap_snps_l, 
+  y = rCRS, 
+  by = join_by("pos" == "aln_pos")
+)
+
+feather::write_feather(
+  x = overlap_snps_l, 
+  path = "~/Documents/data/lhf_d/feather/overlap_snps_05_2024.feather"
+)
+
+overlap_snps_l <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/overlap_snps_05_2024.feather"
+)
+
+overlap_snps_l$test <- factor(
+  overlap_snps_l$test, 
+  levels = c("ds","none", "RUS|GBR|ESP|USA", "RUS", "USA", "GBR", "ESP")
+)
+
+unique(overlap_snps_l$test)
+```

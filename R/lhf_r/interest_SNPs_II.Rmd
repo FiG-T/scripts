@@ -21,11 +21,13 @@ library(ggplot2)
 library(stringr)
 library(dplyr)
 library(tidyr)
+#library(tidytree)
+library(ape)
 
 ```
 
 ### Palettes
-
+Add in source information -------------------------------------------
 ```{r}
 
 FiGT_continent_palette <- c(
@@ -47,9 +49,33 @@ FiGT_continent_palette <- c(
 paleo_wcvp_outbreaks <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/lhf_meta_paleo_wcvp_outbreaks_05_2024.feather"
 )
+
+# import midpoint rooted tree (see above)
+FastTree_full_rooted <- ape::read.tree(
+  file = "~/Documents/data/lhf_d/trees/mafft_aln_filtered_FastTree_02_2024_rooted.tree"
+)
+
+lhf_gt_pc_st2_meta <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_full_07_2024.feather"
+)
+
+lhf_gt_meta_ds_subset <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_07_2024.feather"  
+)
+
+lhf_names <- readr::read_delim(
+  file = "~/Documents/data/lhf_d/vcf/lhf_filtered_maf0.005_sampleNames.txt", 
+  delim = "/t", 
+  col_names = "samples"
+)
 ```
 
+
 # SNP linkage
+
+Mitochondrial DNA has often been considered as a single locus (due to the lack of recombination).  A possible criticism of this work is therefore that all detected sites are highly correlating with each other and I do not have multiple independent signals. 
+
+LD is hard to calculate so a simple R^[2] has been used instead. 
 
 ```{r calculate_SNP_cor}
 
@@ -70,6 +96,7 @@ GT_cor$value <- round(
   x = GT_cor$value, 
   digits = 3
 )
+
 ```
 
 ```{r change_labels}
@@ -184,13 +211,13 @@ ggplot2::ggplot(
       angle = 55,
       vjust = 0.5,
       hjust = 0.5,
-      size = 5
+      size = 15
     ), 
     axis.text.y = element_text(
       angle = 5,
       vjust = 0.5,
       hjust = 0.5, 
-      size = 4
+      size = 15
     ), 
     legend.position = "bottom"
     # axis.title = element_blank(), 
@@ -204,7 +231,7 @@ Note that these SNPs are phased to the rCRS.
 ```{r save_SNP_correlation_plot}
 
 ggplot2::ggsave(
-  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_core_GLM_hits_correlation_heatmap_06_2024.png",
+  #filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_core_GLM_hits_correlation_heatmap_07_2024.png",
   plot = last_plot(),
   bg = "transparent", 
   width = 12, 
@@ -238,6 +265,169 @@ From initial inspection:
 > 8251: correlates (-vely) with precipitation variables
 >
 > 3010: -ve correlation with temp variables
+
+# Repeat mutations 
+
+```{r sorting_tree_names}
+lhf_names <- lhf_names %>%
+  separate_wider_delim(
+    cols = samples, 
+    names = c("acc", "country"),
+    too_many = "merge",
+    delim = "_", 
+    cols_remove = FALSE
+  )
+
+names(lhf_names) <- c("acc", "country_og", "samples_og")
+
+glm_indv_acc <- lhf_gt_meta_ds_subset %>% 
+  filter(!is.na(pos_93)) %>%
+  select(acc)
+
+glm_og_links <- left_join(
+  x = glm_indv_acc, 
+  y = lhf_names
+)
+
+glm_indv <- c(glm_og_links$samples_og)
+length(glm_indv)
+```
+
+```{r pruning_tree}
+
+pruned_tree <- drop.tip(
+  FastTree_full_rooted, 
+  setdiff(
+    FastTree_full_rooted$tip.label, 
+    glm_indv
+  )
+)
+
+length(FastTree_full_rooted$tip.label)
+length(pruned_tree$tip.label)
+
+# create a new tibble for the tree metadata 
+tree_meta <- dplyr::as_tibble(pruned_tree$tip.label) %>% distinct()
+names(tree_meta) <- "samples_og"
+
+tree_meta <- dplyr::left_join(
+  tree_meta, 
+  glm_og_links,  # this is queried above
+  by = join_by("samples_og"=="samples_og")
+)
+
+# combine populations (countries) with the associated metadata
+tree_meta <- dplyr::left_join(
+  tree_meta, 
+  lhf_gt_meta_ds_subset,  # this is queried above
+  by = join_by("acc"=="acc")
+)
+```
+
+```{r plotting_trees}
+
+pdf(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/supplementary/lhf_hits_trees_08_2024.pdf" , 
+  onefile = TRUE, 
+  width = 9, 
+  height = 9
+)
+
+ allele_palette <- c(
+    "black", "maroon2", "turquoise2", "forestgreen"
+  )
+
+for (i in seq_along(GT_cor_pos$pos) ) { # see above for GT_cor_pos
+  
+  j <- GT_cor_pos$pos[i]
+  k <- GT_cor_pos$rCRS_pos[i]
+  
+  ape::plot.phylo(
+    x = pruned_tree, 
+    type = "fan",
+    show.tip.label = FALSE,
+    #use.edge.length = FALSE, 
+    cex = 0.7, 
+    #srt = 20, 
+    #label.offset = 0.05, 
+    edge.color = allele_palette[as.numeric(
+      as.factor(
+        tree_meta[[j]]
+      )
+    )], 
+    main = k
+  )
+  
+}
+
+dev.off()
+
+GT_cor_pos$pos
+
+```
+
+```{r continental_tree}
+unique(as.factor(tree_meta[["continent"]]))
+
+pruned_tree_countries <- pruned_tree 
+pruned_tree_countries$tip.label <- tree_meta$country
+
+length(pruned_tree_countries$tip.label)
+length(tree_meta$country)
+
+pdf(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/supplementary/lhf_indv_continental_tree_08_2024.pdf" , 
+  onefile = TRUE, 
+  width = 9, 
+  height = 9
+)
+
+ape::plot.phylo(
+  x = pruned_tree_countries, 
+  type = "fan",
+  show.tip.label = FALSE,
+  #use.edge.length = FALSE, 
+  cex = 0.2, 
+  srt = 20, 
+  label.offset = 0.01, 
+  edge.color = FiGT_continent_palette[as.numeric(
+    as.factor(
+      tree_meta[["continent"]]
+    ) 
+  )]#, 
+  #main = "Continental Tree"
+)
+  
+dev.off
+
+```
+
+```{r}
+
+eg <- c(1,7,95,545,669,891,9493,11814,12765,12781,1985,14338,14377)
+
+FiGT_continent_palette[as.numeric(
+    as.factor(
+      tree_meta[["continent"]]
+    ) 
+  )][eg ]
+
+
+as.factor(
+      tree_meta[["continent"]]
+    )[eg]
+
+```
+
+```{r save_continent_tree}
+ggplot2::ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/supplementary/lhf_indv_continental_tree_08_2024.png",
+  plot = last_plot(),
+  bg = "white", 
+  width = 12, 
+  height = 12
+)
+```
 
 # Allele Frequencies
 
@@ -550,6 +740,7 @@ write(
 )
 
 ```
+
 
 ## Combining Hits and Predicted effects
 

@@ -60,12 +60,12 @@ see the listed script for further information.
 
 # importing the phased GLM scores using the downsampled data (see LHF_core_GLMs.Rmd)
 core_GLM_scores_formatted_phased <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_07_2024.feather"
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_08_2024.feather"
 )
 
 # importing the list of significant hits  
 core_GLM_min_null <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_mins_ds_07_2024.feather"
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_mins_ds_08_2024.feather"
 )
 
 
@@ -81,7 +81,7 @@ SNP_classification_N <- feather::read_feather(
 
 # the downsampled data containing the environmental metadata
 lhf_gt_meta_ds_subset <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_07_2024.feather"  
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_08_2024.feather"  
 )
 
 # import combined paleoclimate, plant, and disease data (see lhf_st2_metadata_curation.Rmd)
@@ -218,8 +218,8 @@ ggplot(
     axis.title.y = ggplot2::element_text(
       size = 18
     )
-  ) + 
-  transparent_theme
+  ) #+ 
+  #transparent_theme
 
 #ggplot2::ggsave(
   filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/lhf_hits_loci_overview_08_2024.png",
@@ -337,7 +337,7 @@ lhf_gt_pc_st2_meta <- lhf_gt_pc_st2_meta %>%
     acc:precip_seasonality, area, 
     native:outbreaks_area, 
     mean_T_yr_paleo:lai_paleo, 
-    pos_156:pos_16464
+    pos_157:pos_16285 # note columns now in odd order...
   )
 
 names(lhf_gt_pc_st2_meta)[c(7, 12)] <- c("country", "iso2")
@@ -357,13 +357,13 @@ for (x in c(25:42)){ # check that these align with the right columns
 
 ```{r save_st_metafile}
 
-#feather::write_feather(
+feather::write_feather(
   x = lhf_gt_pc_st2_meta, 
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_full_07_2024.feather"
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_full_08_2024.feather"
 )
 
 lhf_gt_pc_st2_meta <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_full_07_2024.feather"
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_full_08_2024.feather"
 )
 ```
 
@@ -393,6 +393,7 @@ GLM_multi_scorer <- function(
         col_to_use = "NULL",
         test_formulas = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
         null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+        output_file = 1,
         format_table = FALSE # should the output be returned as a list (default) or a table?
         
   ){
@@ -479,7 +480,7 @@ GLM_multi_scorer <- function(
         family = "binomial", 
         control = lme4::glmerControl(
           optimizer = "bobyqa", 
-          optCtrl = list(maxfun = 100000)
+          optCtrl = list(maxfun = 1000000)
         )
       )
       
@@ -495,19 +496,24 @@ GLM_multi_scorer <- function(
         )
       )
       
+      glm_overdisp <- overdisp_fun(mod)
+      
       #print(null_df)
       
       chisq_df <- cbind( 
         # bind the anova together to the SNP position and the formula being used. 
         null_df, 
         snp_pos,
+        glm_overdisp[2],
         test_formulas[i] 
       ) 
       
+      chi_sqs[[i]] <- chisq_df # add this table into the intiated list
+
+      
       message("anova scores created")
       
-      chi_sqs[[i]] <- chisq_df # add this table into the intiated list
-      
+
       #print(chi_sqs[[i]])
       
       }, 
@@ -527,14 +533,31 @@ GLM_multi_scorer <- function(
     chisq_scores[[snp]] <- chi_sqs 
     
     message("Scores added into big list")
-    # calculate overdispersion
-   # glm_overdisp <- overdisp_fun(mod)
     
     message(
       paste(
         snp , " - Chi Squared scores calculated"
       )
     )
+    
+    chisq_scores_table <- bind_rows(chi_sqs)
+    #print(
+    #  str(chisq_scores_table)
+    #)
+    #print(head(chisq_scores_table))
+    
+    if (output_file != 1) {
+    write.csv(
+      chisq_scores_table, 
+      file = output_file, 
+      append = TRUE, 
+      sep = "\t", 
+      row.names = FALSE,
+      col.names = !file.exists(output_file)  # Only add column names if the file does not exist yet
+    )
+      
+    }
+  
   
   }
   message("All Chi Squared Scores returned")
@@ -553,7 +576,7 @@ GLM_multi_scorer <- function(
 }
 ```
 
-### Running on multiple cores 
+### Running on multiple cores
 
 This function divides the SNPs across the number of cores stated. Ensure that
 you have enough cores on your machine to meet the number you specify.
@@ -565,8 +588,9 @@ core_GLM_multi_scorer_parallel <- function(
         col_to_use = NULL,
         test_formula , 
         null_formula , 
-        format_table = NULL, 
-        num_cores = 1 
+        format_table = TRUE, 
+        num_cores = 1, 
+        output_file_stem
 ) {
   # define blocks of SNPs to have in each chunk
   col_chunks <- split(
@@ -581,20 +605,33 @@ core_GLM_multi_scorer_parallel <- function(
       num_cores, "cores used"
     )
   )
-  
+  ## edits
   results <- parallel::mclapply(
     col_chunks, 
     function(chunk){
       
       adj_start <- start_col + min(chunk) -1
       
-      GLM_chi_multi_scorer(
+      chunk_output <- GLM_multi_scorer(
         input, 
         start_col = adj_start, 
         chunk, 
         test_formula, 
-        null_formula
+        null_formula, 
+        #output_file = output_file_name,
+        format_table = format_table
       )
+      
+      write.table(
+        chunk_output,
+        file = output_file_stem,
+        append = TRUE,
+        sep = ",",
+        col.names = !file.exists(output_file_stem),  # Write col names only if the file doesn't exist
+        row.names = FALSE
+      )
+      
+      
     }, 
     mc.cores = num_cores
   )
@@ -658,24 +695,88 @@ non_paleo_iso <-  unique(non_paleo_iso$iso2)
 
 # run the test formulas without paleo variables 
 lhf_st2_GLM_scores <- core_GLM_multi_scorer_parallel(
-  input = lhf_gt_pc_st2_meta, 
+  input = lhf_gt_pc_st2_meta %>%
+    filter( ! iso2 %in% non_paleo_iso) , 
   start_col = 43, 
   num_cores = 6, 
   test_formula = test_formulas, 
   null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
-  format_table = TRUE
+  format_table = TRUE, 
+  output_file_stem = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_WorldClim.csv"
 )
 
 # run the paleovariables on the first batch of SNPs
 lhf_st2_GLM_scores_paleo <- core_GLM_multi_scorer_parallel(
-  input = lhf_gt_pc_st2_meta[,c(1:130)] %>%
+  input = lhf_gt_pc_st2_meta %>%
     filter( ! iso2 %in% non_paleo_iso) , # removing problem countries
   start_col = 43, 
   num_cores = 6, 
   test_formula = test_formulas_paleo, 
   null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
-  format_table = TRUE
+  format_table = TRUE,
+  output_file_stem = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_PastClim.csv"
 )
+
+```
+
+```{r missed_snps_GLMM}
+
+st2_GLM_scores_worldclim <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_WorldClim.csv"
+)
+
+st2_GLM_scores_pastclim <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_PastClim.csv"
+)
+
+st2_GLM_scores <- rbind(
+    st2_GLM_scores_worldclim, 
+    st2_GLM_scores_pastclim
+  )
+  
+
+snps_run_st2 <- unique(sort(st2_GLM_scores$snp_pos))
+
+snps_run_st2 <- str_c(
+  "pos_", snps_run_st2
+)
+
+lhf_gt_pc_st2_meta_extra <- lhf_gt_pc_st2_meta %>%
+  select(
+    !matches(snps_run_st2)
+  )
+
+names(lhf_gt_pc_st2_meta_extra)
+
+core_GLM_multi_scorer_parallel( # see interest SNPs 
+    input = lhf_gt_pc_st2_meta_extra %>%
+      filter( ! iso2 %in% non_paleo_iso), 
+    start_col = 44, 
+    num_cores = 1, 
+    test_formula = c(test_formulas, test_formulas_paleo), 
+    null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+    output_file_stem = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_Extras.csv",
+    format_table = TRUE
+)
+
+st2_GLM_scores_extra <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_Extras.csv"
+)
+
+unique(st2_GLM_scores_extra$snp_pos)
+
+st2_GLM_scores <- rbind(
+    st2_GLM_scores, 
+    st2_GLM_scores_extra
+  )
+
+feather::write_feather(
+  x = st2_GLM_scores,
+  path = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores_all.feather"
+)
+```
+
+```{r}
 
 # run on second batch of SNPs
 lhf_st2_GLM_scores_paleo_ii <- core_GLM_multi_scorer_parallel(
@@ -688,6 +789,12 @@ lhf_st2_GLM_scores_paleo_ii <- core_GLM_multi_scorer_parallel(
   null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
   format_table = TRUE
 )
+
+
+lhf_st2_GLM_scores <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_GLMs_chisq_st2_scores.csv"
+)
+unique(sort(lhf_st2_GLM_scores$snp_pos))
 
 # combine score lists into tables
 lhf_st2_GLM_scores_tb <- dplyr::bind_rows(lhf_st2_GLM_scores, .id = "Check Number")
@@ -713,15 +820,8 @@ lhf_st2_GLM_scores_interact_tb <- dplyr::bind_rows(lhf_st2_GLM_scores_interact, 
 
 ```{r format_st2_hits}
 
-# combine all the results into a single table
-lhf_st2_GLMM_scores <- rbind(
-  lhf_st2_GLM_scores_tb, 
-  lhf_st2_GLM_scores_paleo_tb, 
-  lhf_st2_GLM_scores_paleo_tb_ii
-)
-
 # remove the null models
-lhf_st2_GLMM_scores <- lhf_st2_GLMM_scores %>%
+lhf_st2_GLMM_scores <- st2_GLM_scores %>%
   filter(!is.na(Chisq))
 
 # convert positions to numeric
@@ -729,7 +829,7 @@ lhf_st2_GLMM_scores$snp_pos <- as.numeric(lhf_st2_GLMM_scores$snp_pos)
 
 # extract covariate names 
 lhf_st2_GLMM_scores$covariate <- str_extract(
-  string = lhf_st2_GLMM_scores$`test_formulas[i]`, 
+  string = lhf_st2_GLMM_scores$`test_formulas.i.`, 
   pattern =  "tmp_max|tmp_min|tmp_yr|tmp_range_drl|isotherm|tmp_seasonality|tmp_range_yr|lat|mean_T_yr_paleo|T_seasonality_paleo|T_wetQ_paleo|T_dryQ_paleo|mean_T_warmQ_paleo|mean_T_coldQ_paleo|precip_yr_paleo|precip_dryQ_paleo|precip_coldQ_paleo|npp_paleo|lai_paleo|native_area|endemic_area|outbreaks_area|precip_yr" 
 )
 
@@ -741,12 +841,12 @@ lhf_st2_GLMM_scores <- left_join(
 )
 
 # calculate the log10 of the chisq scores
-lhf_st2_GLMM_scores$log10_scores <- log10(lhf_st2_GLMM_scores$`Pr(>Chisq)`)
+lhf_st2_GLMM_scores$log10_scores <- log10(lhf_st2_GLMM_scores$`Pr..Chisq.`)
 
 ```
 
 ```{r save_st2_hits}
-#feather::write_feather(
+feather::write_feather(
   x = lhf_st2_GLMM_scores, 
   path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_scores_08_2024.feather"
 )
@@ -754,11 +854,6 @@ lhf_st2_GLMM_scores$log10_scores <- log10(lhf_st2_GLMM_scores$`Pr(>Chisq)`)
 lhf_st2_GLMM_scores <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_scores_08_2024.feather"
 )  
-  
-#feather::write_feather(
-  x = lhf_st2_GLM_scores_paleo_tb, 
-  path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_scores_paleo_08_2024.feather"
-)
 ```
 
 ```{r st2_GLMM_scores_w , include=FALSE}
@@ -990,7 +1085,7 @@ lhf_st2_GLMM_scores_f$Map.Locus <- factor(
 
 # Calculate the number of SNPs for which each covariate is significant
 lhf_st2_GLMM_N <- lhf_st2_GLMM_scores_f %>%
-  filter(`Pr(>Chisq)` <= bon_threshold_st2) %>% # bonferroni corrected pvalue
+  filter(`Pr..Chisq.` <= bon_threshold_st2) %>% # bonferroni corrected pvalue
   group_by(covariate) %>%
   reframe( 
     N = n()
@@ -1005,18 +1100,18 @@ lhf_st2_GLMM_N$covariate <- factor(
 
 # create a table with the most significant covariates for each SNP
 lhf_st2_GLMM_min <- lhf_st2_GLMM_scores_f %>%
-  filter(`Pr(>Chisq)` <= bon_threshold_st2) %>%
-  #filter(!covariate %in% c("lat")) %>%
+  filter(`Pr..Chisq.` <= bon_threshold_st2) %>%
+  filter(!covariate %in% c("lat")) %>%
   group_by(rCRS_pos) %>%
   slice_min(log10_scores) %>%
   select(
-    rCRS_pos, logLik, `Pr(>Chisq)`,
+    rCRS_pos, logLik, `Pr..Chisq.`,
     covariate, value, log10_scores,
     Map.Locus, classification, Starting, Ending, length, snp_pos
   ) %>%
   distinct()
 
-#feather::write_feather(
+feather::write_feather(
   x = lhf_st2_GLMM_min, 
   path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_min_noLAT_08_2024.feather"
 )
@@ -1024,6 +1119,8 @@ lhf_st2_GLMM_min <- lhf_st2_GLMM_scores_f %>%
 lhf_st2_GLMM_min <- feather::read_feather(
    path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_min_noLAT_08_2024.feather"
 )
+
+unique(lhf_st2_GLMM_min$rCRS_pos)
 
 # count the number of times a covariate is the strongest hit: 
 lhf_st2_GLMM_min_N <- lhf_st2_GLMM_min %>%
@@ -1131,17 +1228,20 @@ combined_st1_st2_GLMs <- full_join(
 st2_hits <- c(unique(lhf_st2_GLMM_min$rCRS_pos))
 
 # select the positions where there is no significant stage 2 hit
-combined_st1_st2_GLMs %>%
+combined_st1_st2_GLMs <- combined_st1_st2_GLMs %>%
   filter(is.na(covariate)) %>%
   select(rCRS_pos) %>%
   distinct()
+
+sort(combined_st1_st2_GLMs$rCRS_pos)
 ```
 
-This shows that there are 5 SNPs (200, 5460, 6455, 8701, 9947) which are not
-detected as being significant in the second stage of modelling. This could be as
-the Bonferroni corrected threshold is higher (as there are many more tests) or
-that the interact between latitude and precipitation is specifically important
-in the core hits.
+This shows that there are 14 SNPs (199, 239, 3918, 4580, 5046, 5460, 6455, 6734,
+8701, 9947, 9950, 11944, 12414 & 14212) which are not detected as being
+significant in the second stage of modelling. This could be as the Bonferroni
+corrected threshold is higher (as there are many more tests) or that the
+interact between latitude and precipitation is specifically important in the
+core hits.
 
 ```{r all_minSNPs_st2 }
 
@@ -1151,7 +1251,7 @@ lhf_st2_GLMM_min_allSNPs <- lhf_st2_GLMM_scores_f %>%
   group_by(rCRS_pos) %>%
   slice_min(log10_scores) %>%
   select(
-    rCRS_pos, logLik, `Pr(>Chisq)`,
+    rCRS_pos, logLik, `Pr..Chisq.`,
     covariate, value, log10_scores,
     Map.Locus, classification, Starting, Ending, length, snp_pos
   ) %>%
@@ -1285,7 +1385,7 @@ ggplot2::ggplot(
 
 ```{r save_GLM_vep}
 openxlsx::write.xlsx(
-  #x = lhf_st2_GLMM_min_vep, 
+  x = lhf_st2_GLMM_min_vep, 
   file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/lhf_st2_GLMM_min_vep_08_2024.xlsx"
 )
 ```

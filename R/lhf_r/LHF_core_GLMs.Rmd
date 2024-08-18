@@ -34,6 +34,16 @@ library(stringr)
 
 source("https://raw.githubusercontent.com/FiG-T/scripts/main/R/lhf_r/colour_palettes.R")
 
+
+
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)
+  rp <- residuals(model,type="pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
 ```
 
 # Required data
@@ -61,9 +71,16 @@ lhf_meta2 <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/lhf_meta2_maf0.005_data_11_2023.feather"
 )
 
+# sample names in vcf
+lhf_names <- readr::read_delim(
+  file = "~/Documents/data/lhf_d/vcf/lhf_filtered_maf0.005_sampleNames.txt", 
+  delim = "/t", 
+  col_names = "samples"
+)
+
 # mtDNA loci positioning 
 mt_loci_pos <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/mtDNA_loci_positions_classifications.feather"
+  path = "~/Documents/data/lhf_d/feather/mtDNA_loci_all_positions_classifications.feather"
 )
 
 # mtDNA PCA scores 
@@ -73,6 +90,10 @@ lhf_pca_scores <- feather::read_feather(
 # mtDNA PCA eigenvalues
 lhf_pca_eig <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/lhf_pca_eig_0.005_03_2024.feather"
+)
+
+rCRS <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/rCRS_phasing.feather"
 )
 ```
 
@@ -100,6 +121,25 @@ lhf_meta2 <- lhf_meta2 %>%
   filter(country %in% country_N)
 ```
 
+# Creating link to names
+
+As the names on the tree are separate to those in the VCF we have to create a
+link between them...
+
+```{r create_names_link}
+lhf_names <- lhf_names %>%
+  separate_wider_delim(
+    cols = samples, 
+    names = c("acc", "country"),
+    too_many = "merge",
+    delim = "_", 
+    cols_remove = FALSE
+  )
+
+names(lhf_names) <- c("acc", "country_og", "samples_og")
+
+```
+
 # Merging datasets
 
 The GLM models require all the data to be contained within a single table, it is
@@ -107,33 +147,40 @@ therefore necessary to join all the datasets together.
 
 ```{r merge_datasets}
 
-# combine environmental data and patristic distances
-lhf_gt_meta_pd <- dplyr::left_join(
+# merge names link at meta 
+lhf_gt_meta <- dplyr::left_join(
   lhf_meta2, 
-  patr_dist_df, 
-  by = "samples"
+  lhf_names, 
+  by = "acc"
 )
 
+# combine environmental data and patristic distances
+#lhf_gt_meta_pd <- dplyr::left_join(
+#  lhf_meta2, 
+#  patr_dist_df, 
+#  by = "samples"
+#)
+
 # add in genotype data 
-lhf_gt_meta_pd <- dplyr::left_join(
-  lhf_gt_meta_pd, 
+lhf_gt_meta <- dplyr::left_join(
+  lhf_gt_meta, 
   lhf_gt_t, 
-  by = join_by("samples" == "id")
+  by = join_by("samples_og" == "id")
 )
 
 # format column names 
-names(lhf_gt_meta_pd) <- gsub(
+names(lhf_gt_meta) <- gsub(
   pattern = "1_", 
   replacement = "pos_", 
-  x = names(lhf_gt_meta_pd)
+  x = names(lhf_gt_meta)
 )
 
 # Convert genotype data to numeric 
-for (x in 21:ncol(lhf_gt_meta_pd)){
+for (x in 22:ncol(lhf_gt_meta)){
 
-col <- names(lhf_gt_meta_pd)[x]
+  col <- names(lhf_gt_meta)[x]
 
-lhf_gt_meta_pd[[col]] <- as.numeric(lhf_gt_meta_pd[[col]])
+lhf_gt_meta[[col]] <- as.numeric(lhf_gt_meta[[col]])
 }
 ```
 
@@ -142,8 +189,6 @@ This combined contains data on:
 1.  Unique sample codes for each mtDNA sequence.
 2.  Associated geographical data
 3.  Associated BioClimatic covariates (arranged by countries).
-4.  The patristic distance between each individual and individual KC345983 (from
-    Botswana)
 
 As the range and units or the different environmental covariates are variable,
 these all need to be scaled before being used in the GLM analysis.
@@ -154,9 +199,9 @@ these all need to be scaled before being used in the GLM analysis.
 col_to_scale <- c(4,5,11:19)
 for (x in col_to_scale){
   
-  col <- names(lhf_gt_meta_pd)[x]
+  col <- names(lhf_gt_meta)[x]
   
-  lhf_gt_meta_pd[[col]] <- scale(lhf_gt_meta_pd[[col]])
+  lhf_gt_meta[[col]] <- scale(lhf_gt_meta[[col]])
 }
 
 ```
@@ -165,8 +210,8 @@ for (x in col_to_scale){
 
 # Save this file 
 feather::write_feather(
-  x = lhf_gt_meta_pd, 
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pd_KC345983.feather"
+  x = lhf_gt_meta, 
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_08_2024.feather"
 )
 
 ```
@@ -176,26 +221,20 @@ feather::write_feather(
 ```{r re_load_data}
 
 # load in data 
-lhf_gt_meta_pd <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pd_KC345983.feather"
+lhf_gt_meta <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_08_2024.feather"
 )
 
-# load in pca scores
-lhf_pca_scores <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/lhf_pca_scores_0.005_03_2024.feather"
-)
-
-# load in metadata with acc for all indv in pca
+# environemental metadata 
 lhf_meta2 <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/lhf_meta2_maf0.005_data_11_2023.feather"
 )
-
 ```
 
 ```{r merge_PC_meta}
 
 # check the number of rows in each 
-nrow(lhf_gt_meta_pd) 
+nrow(lhf_gt_meta) 
 nrow(lhf_pca_scores)
 nrow(lhf_meta2)
 
@@ -212,7 +251,7 @@ head(lhf_pca_scores)
 # use this to combine with the full metadata table 
 lhf_gt_meta_pc <- right_join(
   x = lhf_pca_scores, 
-  y = lhf_gt_meta_pd, 
+  y = lhf_gt_meta, 
   by = "acc"
 )
 
@@ -220,9 +259,6 @@ lhf_gt_meta_pc$PC1 <- scale(lhf_gt_meta_pc$PC1)
 lhf_gt_meta_pc$PC2 <- scale(lhf_gt_meta_pc$PC2)
 lhf_gt_meta_pc$PC3 <- scale(lhf_gt_meta_pc$PC3)
 lhf_gt_meta_pc$PC4 <- scale(lhf_gt_meta_pc$PC4)
-
-lhf_gt_meta_pc <- lhf_gt_meta_pc %>%
-  select(-patr_KC345983)
 
 head(lhf_gt_meta_pc)
 
@@ -237,7 +273,7 @@ Save this file:
 # Save this file 
 feather::write_feather(
   x = lhf_gt_meta_pc, 
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_PCs.feather"
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_PCs_08_2024.feather"
 )
 
 ```
@@ -334,7 +370,8 @@ feather::write_feather(
 
 ### Plotting PCs
 
-I thought it was worth checking quickly how the PCs are distributed across the different axis.
+I thought it was worth checking quickly how the PCs are distributed across the
+different axis.
 
 ```{r PC_correlations}
 
@@ -389,7 +426,7 @@ The overall workflow is:
 
 core_GLM_chi_scorer <- function(
         input,  # the full combined dataset
-        start_col = 21,  # the column where the genotype data starts
+        start_col = 26,  # the column where the genotype data starts
         col_to_use = "NULL",
         test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
         null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
@@ -403,9 +440,8 @@ core_GLM_chi_scorer <- function(
   if (col_to_use[1] == "NULL") { 
     col_pos <- c(
       start_col:ncol(input)
-    ) 
-  } else {
-    col_pos <- col_to_use
+    ) } else {
+    col_pos <- c(col_to_use)
   }
   
   # start loop
@@ -429,6 +465,17 @@ core_GLM_chi_scorer <- function(
       pattern = "\\d+" # extract digits 
     )
     
+    print(snp_pos)
+    
+    # create Null formula
+    formula_null <- as.formula(
+      paste(
+        snp, null_formula
+      )
+    )
+    
+    print(formula_null)
+    
     # create formula
     formula <- as.formula(
       paste(
@@ -436,6 +483,16 @@ core_GLM_chi_scorer <- function(
       )
     )
     
+    # create null model with principal components
+    null_mod <- lme4::glmer( 
+      data = glm_gt_data_bi,
+      formula = formula_null ,
+      family = "binomial", 
+      control = lme4::glmerControl(
+        optimizer = "bobyqa", 
+        optCtrl = list(maxfun = 100000)
+      )
+    )
     # run model with environmental variables
     mod <- lme4::glmer( 
       data = glm_gt_data_bi,
@@ -447,32 +504,16 @@ core_GLM_chi_scorer <- function(
       )
     )
     
+      print(mod)
+    
     # create anova table:
-    chisq_df <- as.data.frame(
-      drop1( # this performs the drop-test (sequentially removes variables from the full model)
-        mod, 
-        test="Chisq",  # this is synonomous with the LRT test 
-        na.rm = TRUE
-      )
-    )
-    
-    # create Null formula
-    formula_null <- as.formula(
-      paste(
-        snp, null_formula
-      )
-    )
-    
-    # create null model with patristic distance
-    null_mod <- lme4::glmer( 
-      data = glm_gt_data_bi,
-      formula = formula_null ,
-      family = "binomial", 
-      control = lme4::glmerControl(
-        optimizer = "bobyqa", 
-        optCtrl = list(maxfun = 100000)
-      )
-    )
+#    chisq_df <- as.data.frame(
+#      drop1( # this performs the drop-test (sequentially removes variables from the full model)
+#        mod, 
+#        test="Chisq",  # this is synonomous with the LRT test 
+#        na.rm = TRUE
+#      )
+#    )
     
     # compare null and full model 
     null_df <- as.data.frame(
@@ -488,7 +529,7 @@ core_GLM_chi_scorer <- function(
     
     # combine with snp value
     chisq_df <- cbind(
-      chisq_df, 
+  #    chisq_df, 
       snp_pos, 
       glm_overdisp[2], 
       null_df$`Pr(>Chisq)`[2]
@@ -620,7 +661,7 @@ core_GLM_formatter <- function(
   table <- input
   
   # rename annoying columns
-  names(table)[c(6,7)] <- c("overdisp", "null_chisq")
+  names(table)[c(10,8)] <- c("overdisp", "null_chisq")
   
   # filter out sites that do not pass the dispersion filters 
   table <- table %>%
@@ -675,14 +716,13 @@ core_GLM_formatter <- function(
   if (neaten == TRUE) {
   # filter results to neaten plot
     table <- table %>%
-      filter(covariate != "PC.") 
+      filter(!is.na(DF)) 
   }
   
   return(table)
 }
 
 ```
-
 
 ## Comparing with the Null
 
@@ -703,26 +743,97 @@ core_GLM_scores_pc <- core_GLM_chi_scorer(
 
 ```
 
+
+```{r core_GLM_scores_downsampled}
+#system.time(
+core_GLM_multi_scorer_parallel( # see interest SNPs 
+  input = lhf_gt_meta_pc_ds ,# %>%
+    #select(! pos_9109), 
+  start_col = 348, 
+  num_cores = 5, 
+  test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
+  null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+  output_file_stem = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_08_2024_pIII.csv",
+  format_table = TRUE
+)
+#)
+```
+
 ```{r core_GLM_scores_downsampled}
 
+471-31
+x <- 44
+
+for (i in c(1:9)){
+  print((x*i)+31)
+}
+
+
+chunks <- c(44, 112, 222, 322)
+chunks_ends <- c(111, 221, 321, 471)
+
+chunks <-c(31,75,119,163,207,251,295,339,383,427)
+chunks_ends <- c(74,118,162,206,250,294,338,382,426,471)
+
+
+for (i in seq_along(chunks)){
+  
+  file_path <- paste0(
+    "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_chunk", 
+    i,
+    "_08_2024.csv"
+  )
+  
+  message(
+    paste(
+      "Start of chunk: ", chunks[i]
+    ) 
+  )
+  message(
+    paste(
+      "End of chunk: ", chunks_ends[i]
+    ) 
+  )
+  
+  
+  core_GLM_multi_scorer_parallel( # see interest SNPs 
+    input = lhf_gt_meta_pc_ds[,c(1:chunk_ends[i])], 
+    start_col = chunks[i], 
+    num_cores = 8, 
+    test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
+    null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+    output_file_stem = file_path,
+    format_table = TRUE
+)
+  
+  
+}
+
+```
+
+
+```{r core_GLM_scores_downsampled, include=FALSE}
+
 system.time(
-core_GLM_scores_ds <- core_GLM_chi_scorer(
+core_GLM_scores_ds <- GLM_multi_scorer(
   input = lhf_gt_meta_pc_ds, 
-  start_col = 24,
+  start_col = 28,
   test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
-  null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)"
+  null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+  output_file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_08_2024_run4.csv"
 )
 )
+
 
 # 24-160 run initially
 # running on downsampled dataset in 3 halves...
 system.time(
-#core_GLM_scores_ds <- core_GLM_scorer_parallel(
+core_GLM_scores_ds <- core_GLM_scorer_parallel(
   input = lhf_gt_meta_pc_ds, 
-  start_col = 468,
+  start_col = 26,
   test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
   null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)",
-  num_cores = 2
+  num_cores = 5
 )
 )
 
@@ -761,8 +872,82 @@ core_GLM_scores <- feather::read_feather(
   path = "~/Documents/data/lhf_d/feather/core_GLM_scores_DOWNSAMPLED_05_2024.feather"
 )
 
+core_GLM_scores <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_08_2024_pII.csv", 
+  header = TRUE
+)
+
+unique(sort(core_GLM_scores$snp_pos))
+
 ```
 
+```{r read_core_GLM_scores}
+
+core_GLM_scores <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_chunk1_08_2024.csv", 
+  header = TRUE
+)
+
+for (i in c(2:10)){
+  
+  file_path <- paste0(
+    "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_chunk",
+    i,
+    "_08_2024.csv"
+  )
+  
+  core_GLM_scores_ii <- read.csv(
+    file = file_path, 
+    header = TRUE
+  )
+  
+  core_GLM_scores <- rbind(
+    core_GLM_scores, 
+    core_GLM_scores_ii
+  )
+  
+}
+
+snps_run <- unique(sort(core_GLM_scores$snp_pos))
+
+snps_run <- str_c(
+  "pos_", snps_run
+)
+
+lhf_gt_meta_pc_ds_subset <- lhf_gt_meta_pc_ds %>%
+  select(
+    !matches(snps_run)
+  )
+
+```
+
+```{r}
+
+core_GLM_multi_scorer_parallel( # see interest SNPs 
+    input = lhf_gt_meta_pc_ds_subset, 
+    start_col = 141, 
+    num_cores = 1, 
+    test_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2) + lat + precip_yr ", 
+    null_formula = "~ PC1 + PC2 + PC3 + PC4 + (1|iso2)", 
+    output_file_stem = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_chunkExtra_08_2024.csv",
+    format_table = TRUE
+)
+
+names(lhf_gt_meta_pc_ds_subset)
+
+
+core_GLM_scores_Extra <- read.csv(
+  file = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/core_GLMs_chisq_chunkExtra_08_2024.csv", 
+  header = TRUE
+)
+
+core_GLM_scores <- rbind(
+    core_GLM_scores, 
+    core_GLM_scores_Extra
+  )
+
+unique(sort(core_GLM_scores$snp_pos))
+```
 
 ## Format & filtering outputs
 
@@ -786,11 +971,11 @@ core_GLM_scores_formatted_phased <- left_join(
 
 #feather::write_feather(
   x = core_GLM_scores_formatted_phased, 
-  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_07_2024.feather" # date changed
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_08_2024.feather" # date changed
 )
 
 core_GLM_scores_formatted_phased <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_07_2024.feather" # date changed
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_formatted_phased_ds_08_2024.feather" # date changed
 )
 
 ```
@@ -816,7 +1001,7 @@ names(lhf_gt_meta_ds_subset)
 
 feather::write_feather(
   x = lhf_gt_meta_ds_subset, 
-  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_07_2024.feather" # date changed
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_pc_ds_subset_08_2024.feather" # date changed
 )
 
 ```
@@ -851,7 +1036,7 @@ feather::write_feather(
 
 # select SNPs where the alternative model performs significantly better
 core_GLM_min_null <- core_GLM_scores_formatted_phased  %>%
-  filter(null_label == "T" & covariate == "<none>") %>%
+  filter(null_label == "T" & !is.na(Df)) %>%
   select(
     snp_pos, rCRS_pos, overdisp, null_chisq, value
   )
@@ -869,7 +1054,7 @@ core_GLM_min_null <- left_join(
 # save this file
 feather::write_feather(
   x = core_GLM_min_null, 
-  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_mins_ds_07_2024.feather" # date changed
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_mins_ds_08_2024.feather" # date changed
 )
 ```
 
@@ -900,9 +1085,9 @@ nrow(core_GLM_hits_pc) == 0 # should be TRUE
 
 core_GLM_hits_pc <- core_GLM_hits %>%  # reformat without removing lat and precip
   group_by(snp_pos) %>%
-  slice_min(`Pr(Chi)`) %>%
-  select(snp_pos, rCRS_pos, covariate, `Pr(Chi)`) %>%
-  group_by(covariate)
+  slice_min(null_chisq) %>%
+  select(snp_pos, rCRS_pos, covariate, null_chisq)# %>%
+  #group_by(covariate)
 # this calculates which is the most sigificant predictor for each SNP 
 # -- for 3 SNPs lat is the strongest predictor
 
@@ -1122,14 +1307,14 @@ ggplot2::ggplot(
     axis.text = element_text(
       size = 14
     )
-  ) +
-  transparent_theme
+  ) #+
+  #transparent_theme
 
 ```
 
 ```{r save_core_manhattan}
 ggplot2::ggsave(
-  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_core_GLM_07_2024.png",
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_core_GLM_08_2024.png",
   plot = last_plot(),
   bg = "transparent", 
   width = 11, 
@@ -1142,5 +1327,3 @@ the full model with latitude and precipitation rather than the null model alone.
 
 > **At the very least this result alone indicates that mitochondrial DNA may not
 > be evolving as neutrally as once thought...**
-
-

@@ -46,12 +46,22 @@ FiGT_continent_palette <- c(
   Asia = "firebrick4", 
   Europe ="orchid3", 
   `North America` ="chartreuse4",
-  `South America` = "chartreuse3",
-  Oceania = "turquoise"
+  Oceania = "turquoise",
+  `South America` = "chartreuse3"
+  
 )
 
+Europe        Asia          North America South America Oceania      
+[6] Africa  
 
-
+FiGT_continent_palette <- c(
+  "orchid3",
+  "firebrick4", 
+  "chartreuse4",
+  "chartreuse3",
+  "turquoise",
+  "deepskyblue4"
+)
 
 # ----- Older env palettes ----- 
 meta_var_palette <- c(
