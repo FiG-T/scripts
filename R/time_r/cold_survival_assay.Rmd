@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Libraries & setup
 
 ```{r libaries}
-
+# select required libraries
 library(readxl)
 library(dplyr)
 library(ggplot2)
@@ -28,22 +28,7 @@ library(ggplot2)
 
 ```{r colour_scheme}
 
-TIME_palette <- c(
-  mX = "orchid1", 
-  tX = "darkorchid", 
-  mM = "deepskyblue2", 
-  tT = "firebrick3"
-)
-
-col2rgb(TIME_palette)
-
-TIME_theme <- theme_light(
-) +
-  theme(
-    strip.background = element_rect(
-      fill = "snow4"
-    )
-  )
+source("https://raw.githubusercontent.com/FiG-T/scripts/refs/heads/main/R/time_r/time_palettes_themes.R")
 ```
 
 # Introduction
@@ -77,7 +62,7 @@ cold_surv <- readxl::read_excel(
 
 ```{r calculate_survival}
 
-cold_surv %>% filter(survival_5h > start) # should be 0 
+cold_surv %>% filter(survival_5h > start) # should be tibble with 0 rows 
 
 cold_surv <- cold_surv %>% 
   mutate(
@@ -104,45 +89,45 @@ cold_surv$pop <- factor(
 
 ## Overview Plots
 
-```{r general_boxplot, warning=FALSE}
+```{r general_boxplot, warning=FALSE, include=FALSE}
 
 # listing what to plot
 measures <- c("per_5h", "per_24h", "per_drop")
 
-for (i in measures){
+for (i in measures){  # for each variable in the measures vector:
   print(
-ggplot(
-  data = cold_surv, 
-  mapping = aes(
-    x = genotype, 
-    y = cold_surv[[i]], 
-    colour = genotype
-  )
-) +
-  geom_boxplot(
-    outlier.shape = NA # do not plot outliers
-  ) +
-  geom_point(
-    position = position_dodge2(0.25),
-    alpha = 0.8
-  ) + 
-  scale_colour_manual(
-    values = TIME_palette
-  ) +
-  ylim(
-    c(0,100)
-  ) +
-  ylab(
-    i
-  ) +
-  xlab(
-    "Genotype"
-  ) +
-  facet_grid(
-    cols = vars(timepoint)
-  ) +
-  TIME_theme
-  ) # close print
+    ggplot(
+      data = cold_surv, 
+      mapping = aes(
+        x = genotype, 
+        y = cold_surv[[i]], 
+        colour = genotype
+      )
+    ) +
+    geom_boxplot(
+      outlier.shape = NA # do not plot outliers
+    ) +
+    geom_point(
+      position = position_dodge2(0.25),
+      alpha = 0.8
+    ) + 
+    scale_colour_manual(
+      values = TIME_palette
+    ) +
+    ylim(
+      c(0,100)
+    ) +
+    ylab(
+      i
+    ) +
+    xlab(
+      "Genotype"
+    ) +
+    facet_grid(
+      cols = vars(timepoint)
+    ) +
+    TIME_theme
+    ) # close print
 }
 
 ```
@@ -219,6 +204,136 @@ surv_summary_genotype <- surv_summary_pop %>%
 
 ```
 
+## Normalising by mM
+
+As there is variability in the parental lines (unexpected, but likely due to the
+effects of living in the cages) an internal control can be used to compare
+relative differences.
+
+```{r normalising_by_mM}
+
+# create small dataframe with mean values for mM and tT
+mMtT_surv <- surv_summary_pop %>%
+  group_by(
+    timepoint
+  ) %>%
+  filter(
+    genotype %in% c("mM", "tT") # select the internal controls 
+  ) %>%
+  group_by(
+    timepoint
+  )%>%
+  reframe(
+    mean_drop = mean(mean_drop) # calculate an average of these
+  ) %>%
+  select(timepoint, mean_drop)
+
+# join this to the full data 
+surv_normalised <- left_join(
+  x = surv_summary_pop, 
+  y = mMtT_surv, 
+  by = "timepoint"
+)
+
+# normalise the values 
+surv_normalised <- surv_normalised %>%
+  reframe(
+    genotype = genotype, 
+    pop = pop,
+    timepoint = timepoint, 
+    surv_norm = mean_drop.x/mean_drop.y,
+    upper = (mean_drop.x + sd_drop)/mean_drop.y,
+    lower = (mean_drop.x - sd_drop)/mean_drop.y
+  )
+
+# calculate averages by genotype 
+surv_normalised_gt <- surv_normalised %>%
+  group_by(
+    timepoint, genotype
+  ) %>%
+  reframe(
+    surv_norm_gt = mean(surv_norm),
+    sd_norm = sd(surv_norm),
+    upper = (surv_norm_gt + sd_norm),
+    lower = (surv_norm_gt - sd_norm)
+  )
+
+```
+
+```{r normalised_plots}
+
+# where y = y_value, error_bar_value, y_lower_limit, y_upper_limit
+#y <- c("surv_norm", "upper", "lower", "pop")
+y <- c("surv_norm_gt", "upper", "lower", "genotype")
+
+ggplot(
+  data = surv_normalised_gt, 
+  mapping = aes(
+    x = .data[[y[4]]], 
+    y = .data[[y[1]]], 
+    colour = genotype
+  )
+) +
+  geom_point(
+    size = 4
+  ) + 
+  geom_errorbar(
+    data = surv_normalised_gt,
+    na.rm = TRUE,
+    mapping = aes(
+      ymin = .data[[y[2]]], 
+      ymax = .data[[y[3]]]
+    )
+  ) +
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(timepoint)
+  ) +
+  TIME_theme
+```
+
+```{r line_plots}
+
+y <- c("surv_norm_gt", "sd_norm")
+
+ggplot(
+  data = surv_normalised_gt, 
+  mapping = aes(
+    x = timepoint, 
+    y = .data[[y[1]]], 
+    colour = as.factor(genotype), 
+    #linetype = as.factor(genotype)
+  )
+) +
+  geom_ribbon(
+    mapping = aes(
+      ymin = .data[[y[1]]] - .data[[y[2]]], 
+      ymax = .data[[y[1]]] + .data[[y[2]]], 
+      fill = genotype
+    ), 
+    linetype = "dashed", 
+    alpha = 0.2
+  ) + 
+  geom_line(
+    linewidth = 2
+  ) + 
+  scale_colour_manual(
+    values = TIME_palette
+  ) +
+   scale_fill_manual(
+    values = TIME_palette
+  ) +
+   #facet_grid(
+  #  cols = vars(genotype)
+  #)  +
+  TIME_theme
+
+```
+
+## Non-normalised Graphs (NOT RECOMMENDED)
+
 ```{r plotting_summaries_pop, warning=FALSE}
 
 y <- c("mean_5h", "sd_5h")
@@ -288,112 +403,6 @@ ggplot(
     c(
       as.numeric(y[3]), 
       as.numeric(y[4])
-    )
-  ) +
-  scale_colour_manual(
-    values = TIME_palette
-  ) +
-  facet_grid(
-    cols = vars(timepoint)
-  ) +
-  TIME_theme
-```
-
-```{r line_plots}
-
-y <- c("mean_5h", "sd_5h")
-ylimits <- c(75, 100)
-
-ggplot(
-  data = surv_summary_pop, 
-  mapping = aes(
-    x = timepoint, 
-    y = .data[[y[1]]], 
-    colour = as.factor(genotype), 
-    linetype = as.factor(pop)
-  )
-) +
-  geom_line(
-  ) + 
-  scale_colour_manual(
-    values = TIME_palette
-  ) +
-   facet_grid(
-    cols = vars(genotype)
-  )  +
-  TIME_theme
-
-```
-
-## Normalising by mM
-
-As there is variability in the parental lines (unexpected, but likely due to the
-effects of living in the cages) an internal control can be used to compare
-relative differences.
-
-```{r normalising_by_mM}
-
-mM_surv <- surv_summary_pop %>%
-  group_by(
-    timepoint
-  ) %>%
-  filter(
-    genotype == "mM"
-  ) %>%
-  select(timepoint, mean_drop)
-
-surv_normalised <- left_join(
-  x = surv_summary_pop, 
-  y = mM_surv, 
-  by = "timepoint"
-)
-
-surv_normalised <- surv_normalised %>%
-  reframe(
-    genotype = genotype, 
-    pop = pop,
-    timepoint = timepoint, 
-    surv_norm = mean_drop.x/mean_drop.y,
-    upper = (mean_drop.x + sd_drop)/mean_drop.y,
-    lower = (mean_drop.x - sd_drop)/mean_drop.y
-  )
-
-surv_normalised_gt <- surv_normalised %>%
-  group_by(
-    timepoint, genotype
-  ) %>%
-  reframe(
-    surv_norm_gt = mean(surv_norm),
-    sd_norm = sd(surv_norm),
-    upper = (surv_norm_gt + sd_norm),
-    lower = (surv_norm_gt - sd_norm)
-  )
-
-```
-
-```{r}
-
-# where y = y_value, error_bar_value, y_lower_limit, y_upper_limit
-#y <- c("surv_norm", "upper", "lower", "pop")
-y <- c("surv_norm_gt", "upper", "lower", "genotype")
-
-ggplot(
-  data = surv_normalised_gt, 
-  mapping = aes(
-    x = .data[[y[4]]], 
-    y = .data[[y[1]]], 
-    colour = genotype
-  )
-) +
-  geom_point(
-    size = 4
-  ) + 
-  geom_errorbar(
-    data = surv_normalised_gt,
-    na.rm = TRUE,
-    mapping = aes(
-      ymin = .data[[y[2]]], 
-      ymax = .data[[y[3]]]
     )
   ) +
   scale_colour_manual(
