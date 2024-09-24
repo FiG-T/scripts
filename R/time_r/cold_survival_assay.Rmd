@@ -319,6 +319,9 @@ ggplot(
   geom_line(
     linewidth = 2
   ) + 
+  geom_point(
+    size = 4
+  ) +
   scale_colour_manual(
     values = TIME_palette
   ) +

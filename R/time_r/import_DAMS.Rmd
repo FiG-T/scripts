@@ -42,6 +42,7 @@ library(stringr)
 library(readxl)
 library(lubridate)
 library(dplyr)
+library(stringr)
 
 ```
 
@@ -325,9 +326,9 @@ Two types of files are required for this function to work.
 
 1.  **A folder (or folders) containing the raw activity files.**
 
-    These folder names should all have the same stem + bloc/timepoint number (if
-    using). All the raw data files should be in the standard DAMS output format
-    (e.g. Monitor1.txt)
+    These folder names should all have the same [stem] + [bloc/timepoint number]
+    (if using). All the raw data files should be in the standard DAMS output
+    format (e.g. Monitor1.txt)
 
 2.  **A metadata file with the biological information for each monitor in each
     folder.**
@@ -341,7 +342,7 @@ The metadata file should be an excel file with information on:
 -   the bloc
 
 -   the date o*f the start* of the experiment (i.e: when they were added to the
-    chambers) - this is used to automatically calculate the burnin time.
+    chambers) - this is used to automatically calculate the burn-in time.
 
 -   the genotype
 
@@ -646,7 +647,6 @@ dams_table <- import_DAMs(
 
 openxlsx::write.xlsx(
   x = dams_table, 
-  file = "~/OneDrive - University College London/data/time_fitness/activity/time_activity_data.xlsx"
+  file = "~/OneDrive - University College London/data/time_fitness/activity/time_activity_data_bloc4.xlsx"
 )
 ```
-

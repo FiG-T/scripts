@@ -28,25 +28,9 @@ library(zoo)
 
 ## Theme setup
 
-```{r setup}
+```{r time_colours}
 
-# set the palette
-TIME_palette <- c(
-  mX = "orchid1", 
-  tX = "darkorchid", 
-  mM = "deepskyblue2", 
-  tT = "firebrick3"
-)
-
-col2rgb(TIME_palette)
-
-TIME_theme <- theme_light(
-) +
-  theme(
-    strip.background = element_rect(
-      fill = "snow4"
-    )
-  )
+source("https://raw.githubusercontent.com/FiG-T/scripts/refs/heads/main/R/time_r/time_palettes_themes.R")
 ```
 
 # Formatting & Analysis of Drosophila Activity Data
@@ -65,7 +49,7 @@ If the data is still in the raw data (MonitorX.txt) format, please see 'import_D
 
 # load in data
 dams_table <- readxl::read_excel(
-  path = "~/OneDrive - University College London/data/time_fitness/activity/time_activity_data.xlsx"
+  path = "~/OneDrive - University College London/data/time_fitness/activity/time_activity_data_bloc4.xlsx"
 )
 ```
 
@@ -101,7 +85,7 @@ exp_dates <- unique(dams_table$date)
 # extract the experimental dates
 day2_activity <- dams_table %>%
   filter(
-    date %in% exp_dates[c(3,8,12)]   # change this to desired date
+    date %in% exp_dates[c(3,8,12,17)]   # change this to desired date
   )
 
 # check that the correct dates are included
@@ -179,7 +163,7 @@ day2_activity <- day2_activity %>%
     sum_counts >= count_threshold
   ) %>%
   select(
-    -sum_counts
+    -sum_counts # no remove this column
   )
 
 ```
@@ -241,7 +225,7 @@ day2_activity_rollmean <- day2_activity_rollmean %>%
   )
 ```
 
-```{r block_averages}
+```{r block_averages, include = FALSE}
 
 # duplicate dataset
 day2_activity_mean <- day2_activity 
@@ -304,20 +288,6 @@ day2_activity_mean$time_interval <- hm(
 
 ```{r activity_by_genotype}
 
-# grouped mean
-day2_activity_gt <- day2_activity_mean %>%
-  group_by(
-    time_interval, bloc, genotype 
-  ) %>%
-  reframe(
-    genotype = genotype,
-    light = light,
-    mean_window = mean(mean_count_30), 
-    sd_gt = sd(mean_count_30)
-  ) %>%
-  distinct()
-
-
 # rolling mean 
 day2_activity_gt_roll <- day2_activity_rollmean %>%
   group_by(
@@ -331,6 +301,19 @@ day2_activity_gt_roll <- day2_activity_rollmean %>%
   ) %>%
   distinct()
 
+# grouped mean
+#day2_activity_gt <- day2_activity_mean %>%
+#  group_by(
+#    time_interval, bloc, genotype 
+#  ) %>%
+#  reframe(
+#    genotype = genotype,
+#    light = light,
+#    mean_window = mean(mean_count_30), 
+#    sd_gt = sd(mean_count_30)
+#  ) %>%
+#  distinct()
+
 ```
 
 ## Plotting activity
@@ -338,26 +321,6 @@ day2_activity_gt_roll <- day2_activity_rollmean %>%
 ### Population Plots
 
 ```{r monitor_plots, include=FALSE}
-
-# for grouped mean
-ggplot2::ggplot(
-  data = day2_activity_mean, 
-  mapping = aes(
-    x = time_interval, 
-    y = mean_count_30, 
-    linetype = pop
-  )
-) + geom_line(
-  mapping = aes(
-    colour = genotype
-  )
-) +
-  ylab(
-    "Blocked Mean of Counts (30 min windows)"
-  ) +
-  scale_colour_manual(
-    values = TIME_palette
-  )
 
 # for rolling mean
 ggplot2::ggplot(
@@ -388,63 +351,6 @@ ggplot2::ggplot(
 
 ```{r plotting_gt_activity, warning=FALSE}
 
-# for block means
-ggplot2::ggplot(
-  data = day2_activity_gt, 
-  mapping = aes(
-    x = time_interval, 
-    y = mean_window, 
-    colour = genotype
-  )
-) + 
-  #geom_errorbar(
-  #  mapping = aes(
-  #    ymin = mean_window - sd_gt, 
-  #    ymax = mean_window + sd_gt
-  #  ), 
-  #  width = 360, 
-  #  #position = position_dodge2(50)
-  #) +
-  geom_ribbon(
-    mapping = aes(
-      ymin = mean_window - sd_gt, 
-      ymax = mean_window + sd_gt, 
-      fill = genotype
-    ), 
-    linetype = "dashed", 
-    alpha = 0.2
-  ) + 
-  geom_line(
-    mapping = aes(
-      colour = genotype
-    ), 
-    #position = position_dodge2(50)
-) +
-  geom_point(
-    mapping = aes(
-      y = mean_window, 
-      colour = genotype
-    ), 
-    size = 2, 
-    #position = position_dodge2(50)
-  ) +
-  scale_colour_manual(
-    values = TIME_palette
-  ) +
-  scale_fill_manual(
-    values = TIME_palette
-  ) +
-  scale_x_time(
-    breaks = c(
-      hours
-    ) 
-  ) +
-  facet_grid(
-    rows = vars(bloc)
-  ) + 
-  TIME_theme
-
-
 # for rolling means
 ggplot2::ggplot(
 ) +
@@ -462,9 +368,6 @@ ggplot2::ggplot(
   scale_alpha_manual(
     values = c(0.4, 0.1)
   ) +
-    facet_grid(
-    rows = vars(bloc)
-  ) + 
   #geom_errorbar(
   #  mapping = aes(
   #    ymin = mean_window - sd_gt, 
@@ -502,17 +405,19 @@ ggplot2::ggplot(
     size = 2, 
     #position = position_dodge2(50)
   ) +
+  facet_grid(
+    rows = vars(bloc)
+  ) +
   scale_colour_manual(
     values = TIME_palette
   ) +
   scale_fill_manual(
     values = TIME_palette
   ) +
-  scale_x_time(
-    breaks = c(
-      hours
-    )
-  ) +
+  #breaks = c(
+  #    hours
+  # )
+  #) +
   TIME_theme
 ```
 
@@ -540,11 +445,13 @@ start <- day2_activity_gt_roll %>% # calculated below
   select(time) 
 
 light_on <- day2_activity_gt_roll %>%
+  filter(bloc != 4) %>%
   filter(light == 1) %>%
   slice_min(time) %>%
   select(time) 
 
 light_off <- day2_activity_gt_roll %>%
+  filter(bloc != 4) %>%
   filter(light == 1) %>%
   slice_max(time) %>%
   select(time) 
@@ -749,18 +656,18 @@ As a single metric is often easier to interpret than a full activity plot...
 ```{r day_night_per_pop}
 
 # for block means
-diurnal_activity <- day2_activity_mean %>%
-  group_by(
-    light, bloc, genotype, pop 
-  ) %>%
-  reframe(
-    genotype = genotype,
-    pop = pop,
-    light = light,
-    mean_window = mean(sum_count_30), 
-    sd_pop = sd(sum_count_30)
-  ) %>%
-  distinct()
+#diurnal_activity <- day2_activity_mean %>%
+#  group_by(
+#    light, bloc, genotype, pop 
+#  ) %>%
+#  reframe(
+#    genotype = genotype,
+#    pop = pop,
+#    light = light,
+#    mean_window = mean(sum_count_30), 
+#    sd_pop = sd(sum_count_30)
+#  ) %>%
+#  distinct()
 
 # for rolling averages
 diurnal_activity_roll <- day2_activity_rollmean %>%
@@ -795,9 +702,9 @@ diurnal_activity_roll_chamber <- day2_activity_rollmean %>%
 
 ```{r plot_day_vs_night}
 
-diurnal_activity_pop <- list(diurnal_activity, diurnal_activity_roll)
+diurnal_activity_pop <- list( diurnal_activity_roll)
 
-for (i in c(1,2)) {
+for (i in c(1)) {
   
   print(
   ggplot2::ggplot(
@@ -839,17 +746,17 @@ for (i in c(1,2)) {
 ```{r diurnal_by_gt}
 
 # for block means
-diurnal_activity_gt <- diurnal_activity %>%
-  group_by(
-    light, bloc, genotype 
-  ) %>%
-  reframe(
-    genotype = genotype,
-    light = light,
-    mean_activity = mean(mean_window), 
-    sd_gt = sd(mean_window)
-  ) %>%
-  distinct()
+#diurnal_activity_gt <- diurnal_activity %>%
+#  group_by(
+#    light, bloc, genotype 
+#  ) %>%
+#  reframe(
+#    genotype = genotype,
+#    light = light,
+#    mean_activity = mean(mean_window), 
+#    sd_gt = sd(mean_window)
+#  ) %>%
+#  distinct()
 
 # for rolling averages
 diurnal_activity_roll_gt <- diurnal_activity_roll %>%
@@ -868,9 +775,9 @@ diurnal_activity_roll_gt <- diurnal_activity_roll %>%
 
 ```{r diurnal_plots_gt}
 
-diurnal_activity_gt <- list(diurnal_activity_gt, diurnal_activity_roll_gt)
+diurnal_activity_gt <- list(diurnal_activity_roll_gt)
 
-for (i in c(1,2)) {
+for (i in c(1)) {
   
   print(
   ggplot2::ggplot(
