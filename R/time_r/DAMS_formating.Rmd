@@ -118,7 +118,7 @@ The absence of any counts (or presence of a very limited number) across the day 
 
 ```{r sum_activity_chamber}
 
-# average activity by monitor across the whole day
+# sum activity by monitor across the whole day
 sum_activity_chamber <- day2_activity %>%
   group_by(
     bloc, monitor, chamber
@@ -163,7 +163,7 @@ day2_activity <- day2_activity %>%
     sum_counts >= count_threshold
   ) %>%
   select(
-    -sum_counts # no remove this column
+    -sum_counts # then remove this column
   )
 
 ```
@@ -179,7 +179,7 @@ Average activity can be calculated in two ways:
 
 ```{r rolling_averages}
 
-# duplicate data
+# duplicate data (to backup against any future errors)
 day2_activity_rollmean <- day2_activity 
 
 # convert time to 'time' data class 
@@ -193,7 +193,7 @@ day2_activity_rollmean <- day2_activity_rollmean %>%
   mutate(
     mean_count_60 = zoo::rollmean( # mean per hour window
       counts, 
-      k = (60*60), 
+      k = (60*60), # time in seconds 
       fill = NA, 
       align = "center", 
       na.rm = FALSE
@@ -202,7 +202,7 @@ day2_activity_rollmean <- day2_activity_rollmean %>%
   mutate(
     sum_count_30 = zoo::rollsum( # sum per 30 min window
       counts, 
-      k = (60*30), 
+      k = (60*30), # time in seconds
       fill = NA, 
       align = "center"
     )
@@ -210,7 +210,7 @@ day2_activity_rollmean <- day2_activity_rollmean %>%
   mutate(
     mean_count_30 = zoo::rollmean( # mean count per 30 min window
       counts, 
-      k = (30*60), 
+      k = (30*30), 
       fill = NA, 
       align = "center"
     )
@@ -224,6 +224,8 @@ day2_activity_rollmean <- day2_activity_rollmean %>%
     )
   )
 ```
+
+If you wish to use the "block approach" then the following code can be used. This method will result in less smooth averages and as such is not recommended.
 
 ```{r block_averages, include = FALSE}
 
@@ -316,6 +318,60 @@ day2_activity_gt_roll <- day2_activity_rollmean %>%
 
 ```
 
+## Light timings
+
+```{r labels}
+
+
+light_labels <- labeller(
+  light = c(
+    "0" = "Night", 
+    "1" = "Day"
+  )
+)
+```
+
+```{r light_timings}
+
+# select the start time for the recording 
+start <- day2_activity_gt_roll %>% # calculated below
+  slice_min(time) %>%
+  select(time) 
+
+# determine when the light comes on
+light_on <- day2_activity_gt_roll %>%
+  filter(bloc != 4) %>% # remove bloc 4 due to faulty lighting
+  filter(light == 1) %>%
+  slice_min(time) %>% # when does the light turn on?
+  select(time) 
+
+# determine when the light turns off
+light_off <- day2_activity_gt_roll %>%
+  filter(bloc != 4) %>% # still exclude bloc 4
+  filter(light == 1) %>%
+  slice_max(time) %>%
+  select(time) 
+
+# determine the end of the recording window
+end <- day2_activity_gt_roll %>%
+  slice_max(time) %>%
+  select(time) 
+
+# convert from tibble to character
+start <- unique(start$time)
+light_on <- unique(light_on$time)
+light_off <- unique(light_off$time)
+end <- unique(end$time)
+
+# combine together 
+light_timings <- tibble(
+  xstart = c(start, light_on, light_off), 
+  xend = c(light_on, light_off , end), 
+  light = c(0,1,0)
+)
+
+```
+
 ## Plotting activity
 
 ### Population Plots
@@ -347,6 +403,8 @@ ggplot2::ggplot(
   )
 ```
 
+This graph show the average for a sample population (here mX_1), there is a noticeable issue for bloc 4. This is highly likely due to errors in the Temperature Cabinet (a different one was used for thus timepoint).
+
 ### Plots by genotype
 
 ```{r plotting_gt_activity, warning=FALSE}
@@ -354,10 +412,10 @@ ggplot2::ggplot(
 # for rolling means
 ggplot2::ggplot(
 ) +
-  geom_rect(
+  geom_rect( # set the background colours for light and dark 
     data = light_timings,
     mapping = aes(
-      ymin = -Inf,
+      ymin = -Inf, # cover the whole of the yaxis 
       ymax = Inf, 
       xmin = xstart,
       xmax = xend,
@@ -377,7 +435,7 @@ ggplot2::ggplot(
   #  #position = position_dodge2(50)
   #) +
   geom_ribbon(
-    data = day2_activity_gt_roll,
+    data = day2_activity_gt_roll, # using the activity summary dataset 
     mapping = aes(
       x = time,
       ymin = mean_window - sd_gt, 
@@ -387,7 +445,7 @@ ggplot2::ggplot(
     linetype = "dashed", 
     alpha = 0.2
   ) + 
-  geom_line(
+  geom_line( # overlay the lines 
     data = day2_activity_gt_roll, 
     mapping = aes(
       y = mean_window, 
@@ -395,7 +453,7 @@ ggplot2::ggplot(
       colour = genotype
     )
 ) +
-  geom_point(
+  geom_point( # add in the timepoint dots 
     data = day2_activity_gt_roll , 
     mapping = aes(
       y = mean_window, 
@@ -421,59 +479,391 @@ ggplot2::ggplot(
   TIME_theme
 ```
 
-## Activity data stats
+## Grouping Day & Night
 
-```{r labels}
+As a single metric is often easier to interpret than a full activity plot...
 
+```{r day_night_per_pop}
 
-light_labels <- labeller(
-  light = c(
-    "0" = "Night", 
-    "1" = "Day"
+# for block means
+#diurnal_activity <- day2_activity_mean %>%
+#  group_by(
+#    light, bloc, genotype, pop 
+#  ) %>%
+#  reframe(
+#    genotype = genotype,
+#    pop = pop,
+#    light = light,
+#    mean_window = mean(sum_count_30), 
+#    sd_pop = sd(sum_count_30)
+#  ) %>%
+#  distinct()
+
+# for rolling averages
+diurnal_activity_roll <- day2_activity_rollmean %>%
+   group_by(
+    light, bloc, genotype, pop  # use the same groupings as earlier but split by light 
+  ) %>%
+  reframe(
+    genotype = genotype,
+    pop = pop,
+    light = light,
+    mean_window = mean(mean_count_60, na.rm = TRUE), 
+    sd_pop = sd(mean_count_60, na.rm = TRUE)
+  ) %>%
+  distinct()
+
+# for rolling averages
+diurnal_activity_roll_chamber <- day2_activity_rollmean %>%
+   group_by(
+    light, bloc, genotype, pop, chamber # extra chamber grouping factor 
+  ) %>%
+  reframe(
+    genotype = genotype,
+    pop = pop,
+    light = light,
+    mean_window = mean(mean_count_60, na.rm = TRUE), 
+    sd_pop = sd(mean_count_60, na.rm = TRUE)
+  ) %>%
+  distinct()
+
+  
+```
+
+```{r plot_day_vs_night}
+
+# initiate a list (extra dataframes can be added if required)
+diurnal_activity_pop <- list(diurnal_activity_roll)
+
+# loop through dataframes in list
+for (i in c(1)) {
+  
+  print(
+  ggplot2::ggplot(
+    data = diurnal_activity_pop[[i]], 
+    mapping = aes(
+      x = pop, 
+      y = mean_window, 
+      colour = genotype
+    )
+  ) +
+  geom_errorbar(
+    mapping = aes(
+      ymin = mean_window - sd_pop, 
+      ymax = mean_window + sd_pop
+    ), 
+    width = 0.5
+  ) +
+  geom_point(
+    size = 5
+  ) + 
+  scale_color_manual(
+    values = TIME_palette
+  ) +
+  ylab("Mean activity")+
+  facet_grid(
+    cols = vars(bloc), 
+    rows = vars(light),
+    labeller = light_labels
+  ) +
+  theme_light()
+
+  ) # close print
+}
+
+```
+
+### Grouping by genotype
+
+```{r diurnal_by_gt}
+
+# for block means
+#diurnal_activity_gt <- diurnal_activity %>%
+#  group_by(
+#    light, bloc, genotype 
+#  ) %>%
+#  reframe(
+#    genotype = genotype,
+#    light = light,
+#    mean_activity = mean(mean_window), 
+#    sd_gt = sd(mean_window)
+#  ) %>%
+#  distinct()
+
+# for rolling averages
+diurnal_activity_roll_gt <- diurnal_activity_roll %>%
+   group_by(
+    light, bloc, genotype
+  ) %>%
+  reframe(
+    genotype = genotype,
+    light = light,
+    mean_activity = mean(
+      mean_window, 
+      na.rm = TRUE
+    ), 
+    sd_gt = sd(
+      mean_window, 
+      na.rm = TRUE
+    )
+  ) %>%
+  distinct()
+
+```
+
+```{r diurnal_plots_gt}
+
+diurnal_activity_gt <- list(diurnal_activity_roll_gt)
+
+for (i in c(1)) {
+  
+  print(
+  ggplot2::ggplot(
+  data = diurnal_activity_gt[[i]], 
+  mapping = aes(
+    x = genotype, 
+    y = mean_activity, 
+    colour = genotype
   )
-)
-```
+) +
+  geom_errorbar(
+    mapping = aes(
+      ymin = mean_activity - sd_gt, 
+      ymax = mean_activity + sd_gt
+    ), 
+    width = 0.5
+  ) +
+  geom_point(
+    size = 5
+  ) + 
+  scale_color_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(bloc), 
+    rows = vars(light),
+    labeller = light_labels
+  ) +
+  theme_light()
 
-## Light timings
-
-\-\-\-\-\-\-\-\-\-\-\-\-\-- Need to update --------------------
-
-```{r light_timings}
-
-start <- day2_activity_gt_roll %>% # calculated below
-  slice_min(time) %>%
-  select(time) 
-
-light_on <- day2_activity_gt_roll %>%
-  filter(bloc != 4) %>%
-  filter(light == 1) %>%
-  slice_min(time) %>%
-  select(time) 
-
-light_off <- day2_activity_gt_roll %>%
-  filter(bloc != 4) %>%
-  filter(light == 1) %>%
-  slice_max(time) %>%
-  select(time) 
-
-end <- day2_activity_gt_roll %>%
-  slice_max(time) %>%
-  select(time) 
-
-start <- unique(start$time)
-light_on <- unique(light_on$time)
-light_off <- unique(light_off$time)
-end <- unique(end$time)
-
-light_timings <- tibble(
-  xstart = c(start, light_on, light_off), 
-  xend = c(light_on, light_off , end), 
-  light = c(0,1,0)
-)
+  ) # close print
+}
 
 ```
+Here the failure of the lights to turn off in Bloc 4 is clear... 
 
-## Activity plots
+### Looking at dawn and dusk
+
+```{r pop_peak_activity}
+
+# for rolling averages
+peak_activity <- day2_activity
+peak_activity$time <- hms::as_hms(peak_activity$time)
+
+# recalculate the counts per 30 min window
+peak_activity <- peak_activity %>%
+  group_by(
+     bloc, date, monitor, chamber
+  ) %>%
+  mutate(
+    sum_count_30 = zoo::rollsum( # sum per 30 min window
+      counts, 
+      k = (30), 
+      fill = NA, 
+      align = "center"
+    )
+  )
+
+# reduce this dataset to filter for the peak times
+peak_activity <- peak_activity %>%
+  filter(
+      time == (60*60*10) | time == (60*60*21.5) # select 10AM and 9:30PM
+  ) %>%
+   group_by(
+    time, bloc, genotype, pop
+  ) %>%
+  reframe(
+    genotype = genotype,
+    pop = pop,
+    peak_activity = mean(
+      sum_count_30, 
+      na.rm = TRUE
+    ), 
+    sd_pop = sd(
+      sum_count_30,
+      na.rm = TRUE
+    )
+  ) %>%
+  distinct()
+
+```
+
+```{r plot_peak_activity}
+# per monitor
+ggplot(
+  data = peak_activity,  # data defined above 
+  mapping = aes(
+    x = pop, 
+    y = peak_activity, 
+    colour = genotype
+  )
+) +
+  geom_errorbar(
+    mapping = aes(
+      ymin = peak_activity - sd_pop, 
+      ymax = peak_activity + sd_pop
+    ), 
+    width = 0.2, 
+    position = position_dodge(0.4)
+  ) +
+  geom_point(
+    position = position_dodge(0.4)
+  ) + 
+  scale_color_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(time), 
+    rows = vars(bloc)
+  ) +
+  TIME_theme
+
+```
+
+```{r dawn_dusk_sum}
+
+# for rolling averages
+peak_activity_gt_roll <- peak_activity %>%
+ # filter(
+#      time == '10 hours' | time == '21.5 hours'
+#  ) %>%
+   group_by(
+    time, bloc, genotype
+  ) %>%
+  reframe(
+    genotype = genotype,
+    peak_activity_mean = mean(peak_activity, na.rm = TRUE), 
+    sd_gt = sd(peak_activity, na.rm = TRUE)
+  ) %>%
+  distinct()
+
+
+```
+
+```{r dawndusk_plot}
+
+# per genotype
+ggplot(
+  data = peak_activity_gt_roll, 
+  mapping = aes(
+    x = genotype, 
+    y = peak_activity_mean, 
+    colour = genotype
+  )
+) +
+  geom_errorbar(
+    mapping = aes(
+      ymin = peak_activity_mean - sd_gt, 
+      ymax = peak_activity_mean + sd_gt
+    ), 
+    width = 0.2, 
+    position = position_dodge(0.4)
+  ) +
+  geom_point(
+    position = position_dodge(0.4), 
+    size = 3
+  ) + 
+  ylab(
+    "Mean Activity"
+  ) +
+  scale_color_manual(
+    values = TIME_palette
+  ) +
+  facet_grid(
+    cols = vars(time), 
+    rows = vars(bloc)
+  ) +
+  theme_light()
+  
+  
+  
+
+```
+
+```{r dawn_dusk_lm}
+
+head(diurnal_activity_roll_chamber)
+
+#mod_data <- dawn_activity_chamber %>%
+#  filter(time_interval > "10 hours" )
+
+mod_data <- diurnal_activity_roll_chamber %>%
+  filter(light == 1)
+
+for (i in c("bloc","genotype", "pop", "chamber")) {
+  mod_data[[i]] <- as.factor(mod_data[[i]])
+}
+
+mod_data[["chamber"]] <- as.factor(mod_data[["chamber"]])
+str(mod_data)
+
+activity_mod <- lme4::lmer(
+  formula = mean_window ~   bloc + genotype + pop + (1|chamber),
+  data = mod_data
+)
+mod_aov <- car::Anova(activity_mod)
+mod_aov
+
+mod_emm <- emmeans::emmeans(
+  activity_mod, 
+  pairwise ~ genotype, 
+  adjust = "tukey"
+)
+mod_emm
+
+
+##-----------------------------------------
+
+
+```
+```{r plot_model_means}
+
+model_emm <- tibble::as_tibble(mod_emm$emmeans)
+str(model_emm)
+
+class(model_emm$genotype)
+
+ggplot2::ggplot(
+  data = model_emm, 
+  mapping = aes(
+    x = genotype, 
+    y = emmean, 
+    colour = genotype
+  )
+) + 
+  geom_point(
+    size = 3
+  ) +
+  geom_errorbar(
+    mapping = aes(
+      ymax = upper.CL, 
+      ymin = lower.CL
+    ), 
+    width = 0.5
+  ) +
+  ylab(
+    "Model Calibrated Estimates of \n Mean Daytime Activity (per minute)"
+  ) +
+  xlab(
+    "Genotype"
+  ) +
+  scale_colour_manual(
+   values = TIME_palette 
+  ) +
+  TIME_theme
+```
+
+## DEPRECIATED Activity plots
 
 -   by monitor
 
@@ -646,398 +1036,5 @@ ggplot2::ggplot(
   facet_grid(
     rows = vars(bloc)
   )
-
-```
-
-## Grouping Day & Night
-
-As a single metric is often easier to interpret than a full activity plot...
-
-```{r day_night_per_pop}
-
-# for block means
-#diurnal_activity <- day2_activity_mean %>%
-#  group_by(
-#    light, bloc, genotype, pop 
-#  ) %>%
-#  reframe(
-#    genotype = genotype,
-#    pop = pop,
-#    light = light,
-#    mean_window = mean(sum_count_30), 
-#    sd_pop = sd(sum_count_30)
-#  ) %>%
-#  distinct()
-
-# for rolling averages
-diurnal_activity_roll <- day2_activity_rollmean %>%
-   group_by(
-    light, bloc, genotype, pop
-  ) %>%
-  reframe(
-    genotype = genotype,
-    pop = pop,
-    light = light,
-    mean_window = mean(mean_count_60, na.rm = TRUE), 
-    sd_pop = sd(mean_count_60, na.rm = TRUE)
-  ) %>%
-  distinct()
-
-# for rolling averages
-diurnal_activity_roll_chamber <- day2_activity_rollmean %>%
-   group_by(
-    light, bloc, genotype, pop, chamber
-  ) %>%
-  reframe(
-    genotype = genotype,
-    pop = pop,
-    light = light,
-    mean_window = mean(mean_count_60, na.rm = TRUE), 
-    sd_pop = sd(mean_count_60, na.rm = TRUE)
-  ) %>%
-  distinct()
-
-  
-```
-
-```{r plot_day_vs_night}
-
-diurnal_activity_pop <- list( diurnal_activity_roll)
-
-for (i in c(1)) {
-  
-  print(
-  ggplot2::ggplot(
-  data = diurnal_activity_pop[[i]], 
-  mapping = aes(
-    x = pop, 
-    y = mean_window, 
-    colour = genotype
-  )
-) +
-  geom_errorbar(
-    mapping = aes(
-      ymin = mean_window - sd_pop, 
-      ymax = mean_window + sd_pop
-    ), 
-    width = 0.5
-  ) +
-  geom_point(
-    size = 5
-  ) + 
-  scale_color_manual(
-    values = TIME_palette
-  ) +
-  ylab("Mean activity")+
-  facet_grid(
-    cols = vars(bloc), 
-    rows = vars(light),
-    labeller = light_labels
-  ) +
-  theme_light()
-
-  ) # close print
-}
-
-```
-
-### Grouping by genotype
-
-```{r diurnal_by_gt}
-
-# for block means
-#diurnal_activity_gt <- diurnal_activity %>%
-#  group_by(
-#    light, bloc, genotype 
-#  ) %>%
-#  reframe(
-#    genotype = genotype,
-#    light = light,
-#    mean_activity = mean(mean_window), 
-#    sd_gt = sd(mean_window)
-#  ) %>%
-#  distinct()
-
-# for rolling averages
-diurnal_activity_roll_gt <- diurnal_activity_roll %>%
-   group_by(
-    light, bloc, genotype
-  ) %>%
-  reframe(
-    genotype = genotype,
-    light = light,
-    mean_activity = mean(mean_window, na.rm = TRUE), 
-    sd_gt = sd(mean_window, na.rm = TRUE)
-  ) %>%
-  distinct()
-
-```
-
-```{r diurnal_plots_gt}
-
-diurnal_activity_gt <- list(diurnal_activity_roll_gt)
-
-for (i in c(1)) {
-  
-  print(
-  ggplot2::ggplot(
-  data = diurnal_activity_gt[[i]], 
-  mapping = aes(
-    x = genotype, 
-    y = mean_activity, 
-    colour = genotype
-  )
-) +
-  geom_errorbar(
-    mapping = aes(
-      ymin = mean_activity - sd_gt, 
-      ymax = mean_activity + sd_gt
-    ), 
-    width = 0.5
-  ) +
-  geom_point(
-    size = 5
-  ) + 
-  scale_color_manual(
-    values = TIME_palette
-  ) +
-  facet_grid(
-    cols = vars(bloc), 
-    rows = vars(light),
-    labeller = light_labels
-  ) +
-  theme_light()
-
-  ) # close print
-}
-
-```
-
-### Looking at dawn and dusk
-
-```{r pop_peak_activity}
-
-peak_activity <- day2_activity %>%
-  filter(
-      time == '10 hours' | time == '21.5 hours'
-  ) %>%
-  filter(
-    light == 0
-  ) %>%
-   group_by(
-    time_interval, bloc, genotype, pop
-  ) %>%
-  reframe(
-    genotype = genotype,
-    pop = pop,
-    peak_activity = mean(sum_count_30, na.rm = TRUE), 
-    sd_pop = sd(sum_count_30, na.rm = TRUE)
-  ) %>%
-  distinct()
-
-# for rolling averages
-peak_activity <- day2_activity
-peak_activity$time <- hms::as_hms(peak_activity$time)
-
-peak_activity <- peak_activity %>%
-  group_by(
-     bloc, date, monitor, chamber
-  ) %>%
-  mutate(
-    sum_count_30 = zoo::rollsum( # sum per 30 min window
-      counts, 
-      k = (30), 
-      fill = NA, 
-      align = "center"
-    )
-  )
-
-peak_activity <- peak_activity %>%
-  filter(
-      time == (60*60*10) | time == (60*60*21.5)
-  ) %>%
-   group_by(
-    time, bloc, genotype, pop
-  ) %>%
-  reframe(
-    genotype = genotype,
-    pop = pop,
-    peak_activity = mean(sum_count_30, na.rm = TRUE), 
-    sd_pop = sd(sum_count_30, na.rm = TRUE)
-  ) %>%
-  distinct()
-
-```
-
-```{r}
-# per monitor
-ggplot(
-  data = peak_activity, 
-  mapping = aes(
-    x = pop, 
-    y = peak_activity, 
-    colour = genotype
-  )
-) +
-  geom_errorbar(
-    mapping = aes(
-      ymin = peak_activity - sd_pop, 
-      ymax = peak_activity + sd_pop
-    ), 
-    width = 0.2, 
-    position = position_dodge(0.4)
-  ) +
-  geom_point(
-    position = position_dodge(0.4)
-  ) + 
-  scale_color_manual(
-    values = TIME_palette
-  ) +
-  facet_grid(
-    cols = vars(time), 
-    rows = vars(bloc)
-  ) +
-  TIME_theme
-
-```
-
-```{r dawn_dusk_sum}
-
-# for grouped mean
-peak_activity_gt <- day2_activity_mean %>%
-  filter(
-      time_interval == '10 hours' | time_interval == '21.5 hours'
-  ) %>%
-  group_by(
-    time_interval, bloc, genotype
-  ) %>%
-  reframe(
-    genotype = genotype,
-    time = time_interval,
-    mean_window = mean(mean_count_30), 
-    sd_gt = sd(mean_count_30)
-  ) %>%
-  distinct()
-
-# for rolling averages
-peak_activity_gt_roll <- peak_activity %>%
- # filter(
-#      time == '10 hours' | time == '21.5 hours'
-#  ) %>%
-   group_by(
-    time, bloc, genotype
-  ) %>%
-  reframe(
-    genotype = genotype,
-    peak_activity_mean = mean(peak_activity, na.rm = TRUE), 
-    sd_gt = sd(peak_activity, na.rm = TRUE)
-  ) %>%
-  distinct()
-
-
-
-```
-
-```{r dawndusk_plot}
-
-# per monitor
-ggplot(
-  data = peak_activity_gt, 
-  mapping = aes(
-    x = as.factor(pop), 
-    y = monitor_mean, 
-    colour = genotype
-  )
-) +
-  geom_errorbar(
-    mapping = aes(
-      ymin = monitor_mean - sd_gt, 
-      ymax = monitor_mean + sd_gt
-    ), 
-    width = 0.2, 
-    position = position_dodge(0.4)
-  ) +
-  geom_point(
-    position = position_dodge(0.4)
-  ) + 
-  scale_color_manual(
-    values = TIME_palette
-  ) +
-  facet_grid(
-    cols = vars(as.character(time_interval))
-  ) +
-  theme_light()
-
-# per genotype
-ggplot(
-  data = peak_activity_gt_roll, 
-  mapping = aes(
-    x = genotype, 
-    y = peak_activity_mean, 
-    colour = genotype
-  )
-) +
-  geom_errorbar(
-    mapping = aes(
-      ymin = peak_activity_mean - sd_gt, 
-      ymax = peak_activity_mean + sd_gt
-    ), 
-    width = 0.2, 
-    position = position_dodge(0.4)
-  ) +
-  geom_point(
-    position = position_dodge(0.4), 
-    size = 3
-  ) + 
-  ylab(
-    "Mean Activity"
-  ) +
-  scale_color_manual(
-    values = TIME_palette
-  ) +
-  facet_grid(
-    cols = vars(time), 
-    rows = vars(bloc)
-  ) +
-  theme_light()
-  
-  
-  
-
-```
-
-```{r dawn_dusk_lm}
-
-head(diurnal_activity_roll_chamber)
-
-#mod_data <- dawn_activity_chamber %>%
-#  filter(time_interval > "10 hours" )
-
-mod_data <- diurnal_activity_roll_chamber %>%
-  filter(light == 1)
-
-for (i in c("bloc","monitor" ,"genotype", "pop", "chamber")) {
-  mod_data[[i]] <- as.factor(mod_data[[i]])
-}
-
-mod_data[["chamber"]] <- as.factor(mod_data[["chamber"]])
-str(mod_data)
-
-activity_mod <- lme4::lmer(
-  formula = mean_window ~   bloc + genotype + pop + (1|chamber),
-  data = mod_data
-)
-mod_aov <- car::Anova(activity_mod)
-mod_aov
-
-mod_emm <- emmeans::emmeans(
-  activity_mod, 
-  pairwise ~ genotype, 
-  adjust = "tukey"
-)
-mod_emm
-
-
-###-----------------------------------------
 
 ```
