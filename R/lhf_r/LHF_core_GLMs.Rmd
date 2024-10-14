@@ -1050,6 +1050,7 @@ core_GLM_min_null <- left_join(
     rCRS_pos <= Ending
   )
 )
+core_GLM_min_null <- distinct(core_GLM_min_null)
 
 # save this file
 feather::write_feather(
@@ -1110,6 +1111,31 @@ bon_threshold_hits <- alpha/(n_snp_hits*6) # is this 2 or 3?
 All SNPs are significantly predicted by at least one of the PCs - my
 interpretation of this is that this measure of genetic relatedness is a
 reasonable estimate.
+
+```{r generate_hits_subset}
+
+core_GLM_hit_snps <- sort(
+  unique(core_GLM_hits$snp_pos) # note: this uses the non rCRS positions
+ ) 
+
+core_GLM_hit_snps <- str_c(
+  "pos_", 
+  core_GLM_hit_snps
+)
+
+lhf_gt_meta_ds_subset_core_hits <- lhf_gt_meta_ds_subset %>%
+  select(
+    acc:precip_seasonality, 
+    core_GLM_hit_snps
+  )
+
+# save this file
+feather::write_feather(
+  x = lhf_gt_meta_ds_subset_core_hits, 
+  path = "~/Documents/data/lhf_d/feather/lhf_gt_meta_ds_subset_core_hits_08_2024.feather" # date changed
+)
+
+```
 
 # Generating PCA Plots
 
@@ -1280,6 +1306,8 @@ ggplot2::ggplot(
       mtDNA_palette
     )
   ) +
+  #ggplot2::coord_polar(
+  #) + 
   theme_minimal()+
   theme(
     legend.position = "none", 
@@ -1314,7 +1342,7 @@ ggplot2::ggplot(
 
 ```{r save_core_manhattan}
 ggplot2::ggsave(
-  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/General/Presentations/Figures/lhf_core_GLM_08_2024.png",
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/lhf_core_GLM_08_2024.png",
   plot = last_plot(),
   bg = "transparent", 
   width = 11, 

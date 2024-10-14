@@ -64,8 +64,8 @@ core_GLM_scores_formatted_phased <- feather::read_feather(
 )
 
 # importing the list of significant hits  
-core_GLM_min_null <- feather::read_feather(
-  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_mins_ds_08_2024.feather"
+core_GLM_min_null_clustered <- feather::read_feather(
+  path = "~/Documents/data/lhf_d/feather/core_GLM_scores_mins_ds_clustered_08_2024.feather"
 )
 
 
@@ -106,8 +106,8 @@ vep <- read.csv(
 ```{r order_factors}
 
 # combine the list of significant SNPs with the table showing the number of SNPs at each locus
-core_GLM_min_null$Map.Locus <- factor( # arrange the locus into the order you want to plot them in
-  x = core_GLM_min_null$Map.Locus, 
+core_GLM_min_null_clustered$Map.Locus <- factor( # arrange the locus into the order you want to plot them in
+  x = core_GLM_min_null_clustered$Map.Locus, 
   levels = c(
     "MT-ATT", "MT-CR", # Attachment site and control region
     "MT-7SDNA", "MT-HV1", "MT-HV2", 
@@ -134,7 +134,7 @@ SNPs are significant.
 
 # combine GLM results with total number of SNPs per loci
 interest_snps <- left_join(
-  core_GLM_min_null,
+  core_GLM_min_null_clustered,
   SNP_classification_N, 
   by = "Map.Locus"
 )
@@ -222,7 +222,7 @@ ggplot(
   #transparent_theme
 
 #ggplot2::ggsave(
-  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/lhf_hits_loci_overview_08_2024.png",
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/lhf_hits_loci_overview_10_2024.png",
   plot = last_plot(),
   bg = "transparent", 
   width = 11, 
@@ -253,13 +253,24 @@ are most significant).
 ```{r hits_dotplot}
   
 ggplot2::ggplot(
-  data = core_GLM_min_null, # using the significant hits 
+  data = core_GLM_min_null_clustered, # using the significant hits 
   mapping = aes(
     x = as.factor(rCRS_pos), 
     y = Map.Locus, 
     colour = log10(null_chisq)
   )
-)  + geom_point(
+)  + geom_tile(
+    mapping = aes(
+      fill = classification,
+    ), 
+    alpha = 0.75,
+    colour = "white",
+    show.legend = TRUE
+  )  +
+  scale_fill_manual(
+    values = mtDNA_palette
+  ) +
+  geom_point(
   size = 5
 ) +
   xlab(
@@ -271,8 +282,8 @@ ggplot2::ggplot(
   labs(
     colour = "Log10 Chisq Score"
   )+
-  theme_grey(
-  )+ 
+  theme_light(
+  ) + 
   theme(
     axis.text.x = element_text(
       angle = 90, 
@@ -285,8 +296,8 @@ ggplot2::ggplot(
 ```
 
 ```{r save_multiple_dotplot}
-#ggplot2::ggsave(
-  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/lhf_hits_loci_dotplot_08_2024.png",
+ggplot2::ggsave(
+  filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/lhf_hits_loci_dotplot_10_2024.png",
   plot = last_plot(),
   bg = "transparent", 
   width = 11, 
@@ -353,6 +364,41 @@ for (x in c(25:42)){ # check that these align with the right columns
   
   lhf_gt_pc_st2_meta[[col]] <- scale(lhf_gt_pc_st2_meta[[col]])
 }
+```
+
+```{r sort_lhf_meta_names}
+# get names 
+names_st2_meta <- names(lhf_gt_pc_st2_meta)
+
+# create vector of position names
+names_st2_meta_pos <- names_st2_meta[c(43:length(names_st2_meta))]
+# remove the pos_ prefix
+names_st2_meta_pos <- stringr::str_replace(
+  string = names_st2_meta_pos, 
+  pattern = "pos_", ""
+)
+
+# sort into order
+names_st2_meta_pos <- sort(
+  as.numeric(
+    names_st2_meta_pos
+  )
+)
+
+# add in the prefix
+names_st2_meta_pos <- str_c(
+  "pos_", 
+  names_st2_meta_pos, 
+  sep = ""
+)
+
+# reorder the columns
+lhf_gt_pc_st2_meta <- lhf_gt_pc_st2_meta %>%
+  select(
+    names(lhf_gt_pc_st2_meta[c(1:42)]), 
+    names_st2_meta_pos
+  )
+
 ```
 
 ```{r save_st_metafile}
@@ -1067,13 +1113,18 @@ lhf_st2_GLMM_scores_f$classification <- factor(
 lhf_st2_GLMM_scores_f$Map.Locus <- factor(
   x = lhf_st2_GLMM_scores_f$Map.Locus, 
   levels = c(
-    "MT-ATT", "MT-CR", # Attachment site and control region
-    "MT-ND1", "MT-ND2", "MT-ND3", "MT-ND4", "MT-ND5", "MT-ND6",
+    "MT-ATT", "MT-CR",  "MT-7SDNA", # Attachment site and control region
+     "MT-TFX" , "MT-TFY", "MT-TAS" , "MT-TAS2",
+    "MT-HV1" , "MT-HV2", "MT-HV3", 
+    "MT-OHR", "MT-CSB1",  "MT-CSB2" ,
+    "MT-ND1", "MT-ND2", "MT-ND3", "MT-ND4","MT-ND4L", "MT-ND5", "MT-ND6",
     "MT-CYB",
     "MT-CO1","MT-CO2", "MT-CO3", 
-    "MT-ATP6", "ATP8",
+    "MT-ATP6", "MT-ATP8",
     "MT-RNR1", "MT-RNR2", 
-    "MT-TT", "MT-TG", "MT-TR", "MT-TH" 
+    "MT-SHLP3", "MT-SHLP6",
+    "MT-TT", "MT-TG", "MT-TR", "MT-TH" , "MT-TA", "MT-TI",
+    "MT-NC3"
   )
 )
 
@@ -1086,6 +1137,8 @@ lhf_st2_GLMM_scores_f$Map.Locus <- factor(
 # Calculate the number of SNPs for which each covariate is significant
 lhf_st2_GLMM_N <- lhf_st2_GLMM_scores_f %>%
   filter(`Pr..Chisq.` <= bon_threshold_st2) %>% # bonferroni corrected pvalue
+  filter(!classification %in% c("HVS", "OH", "ATT", "NA", "SHLP", "CSB", "mtTF1") ) %>%
+  filter(! is.na(classification)) %>%
   group_by(covariate) %>%
   reframe( 
     N = n()
@@ -1098,9 +1151,11 @@ lhf_st2_GLMM_N$covariate <- factor(
   levels = var_to_keep
 )
 
-# create a table with the most significant covariates for each SNP
+# create a table with the most significant covariates for each significant SNP
 lhf_st2_GLMM_min <- lhf_st2_GLMM_scores_f %>%
   filter(`Pr..Chisq.` <= bon_threshold_st2) %>%
+  filter(!classification %in% c("HVS", "OH", "ATT", "NA", "SHLP", "CSB", "mtTF1") ) %>%
+  filter(! is.na(classification)) %>%
   filter(!covariate %in% c("lat")) %>%
   group_by(rCRS_pos) %>%
   slice_min(log10_scores) %>%
@@ -1111,6 +1166,12 @@ lhf_st2_GLMM_min <- lhf_st2_GLMM_scores_f %>%
   ) %>%
   distinct()
 
+unique(lhf_st2_GLMM_min$rCRS_pos)
+
+feather::write_feather(
+  x = lhf_st2_GLMM_min, 
+  #path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_min_LAT_08_2024.feather"
+)
 feather::write_feather(
   x = lhf_st2_GLMM_min, 
   path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_min_noLAT_08_2024.feather"
@@ -1120,7 +1181,7 @@ lhf_st2_GLMM_min <- feather::read_feather(
    path = "~/Documents/data/lhf_d/feather/lhf_st2_GLMM_min_noLAT_08_2024.feather"
 )
 
-unique(lhf_st2_GLMM_min$rCRS_pos)
+length(unique(lhf_st2_GLMM_min$rCRS_pos))
 
 # count the number of times a covariate is the strongest hit: 
 lhf_st2_GLMM_min_N <- lhf_st2_GLMM_min %>%
@@ -1177,7 +1238,13 @@ for(i in seq_along(lhf_st2_GLMM_summaries)) {
           label = N
         ), 
         size = 12,
-        nudge_y = 2
+        nudge_y = 1
+      ) +
+      ylim(
+        c(0,8)
+      ) +
+      ylab(
+        "Number of SNPs"
       ) +
       #facet_grid(
       #  rows = vars(classification)
@@ -1201,7 +1268,7 @@ for(i in seq_along(lhf_st2_GLMM_summaries)) {
 ```
 
 ```{r save_paleo_hits}
-#ggplot2::ggsave(
+ggplot2::ggsave(
   filename = "/Users/finleythomas/Library/CloudStorage/OneDrive-UniversityCollegeLondon/Results/lhf/figures/stage2_plots/lhf_st2_GLMM_N_mins_noLAT_08_2024_transparent.png",
   plot = last_plot(),
   bg = "transparent", 
@@ -1210,38 +1277,6 @@ for(i in seq_along(lhf_st2_GLMM_summaries)) {
 )
 # repeat for all desired plots
 ```
-
-To check if the same SNPs are detected in this analysis as in the core SNPs...
-
-```{r check_overlap_snps}
-# combine core and stage 2 results 
-combined_st1_st2_GLMs <- full_join(
-  x = core_GLM_min_null, 
-  y = lhf_st2_GLMM_min %>%
-    select(
-      rCRS_pos, covariate
-    ) %>%
-    distinct(), 
-  by = "rCRS_pos"
-)
-
-st2_hits <- c(unique(lhf_st2_GLMM_min$rCRS_pos))
-
-# select the positions where there is no significant stage 2 hit
-combined_st1_st2_GLMs <- combined_st1_st2_GLMs %>%
-  filter(is.na(covariate)) %>%
-  select(rCRS_pos) %>%
-  distinct()
-
-sort(combined_st1_st2_GLMs$rCRS_pos)
-```
-
-This shows that there are 14 SNPs (199, 239, 3918, 4580, 5046, 5460, 6455, 6734,
-8701, 9947, 9950, 11944, 12414 & 14212) which are not detected as being
-significant in the second stage of modelling. This could be as the Bonferroni
-corrected threshold is higher (as there are many more tests) or that the
-interact between latitude and precipitation is specifically important in the
-core hits.
 
 ```{r all_minSNPs_st2 }
 
